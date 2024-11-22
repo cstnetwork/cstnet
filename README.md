@@ -1,5 +1,5 @@
 # Constraint Learning for Parametric Point Cloud
-Main module: pytorch, pyocc
+Main modules: pytorch, pyocc
 
 ## Model scripts
 ### train classification
