@@ -16,5 +16,5 @@ Main modules: pytorch, pyocc
 
 ## Structure
 ### overall
-<img src="imgs/overall.PNG" alt="" width="1000"/>
+<img src="imgs/overall.png" alt="" width="1000"/>
 
