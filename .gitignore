@@ -1,3 +1,18 @@
-train_seg.py
+models/cstnet_seg.py
+models/multihead_point_transformer_pytorch.py
+models/point_transformer_pytorch.py
+models/pointnet2_cls_ssg.py
+models/pointnet2_cls_msg.py
+models/pointnet2_part_seg_msg.py
+models/pointnet2_part_seg_ssg.py
+models/pointnet2_sem_seg.py
+models/pointnet2_sem_seg_msg.py
+models/pointnet2_utils.py
+models/pointnet_cls.py
+models/pointnet_part_seg.py
+models/pointnet_sem_seg.py
+models/pointnet_utils.py
+
+
 
 

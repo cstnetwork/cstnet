@@ -223,15 +223,15 @@ class Embed(nn.Module):
         return center_xyz, center_eula, center_near, center_meta, new_fea
 
 
-class CstNet_Cls(nn.Module):
-    def __init__(self, n_classes, n_metatype):
+class CstNet(nn.Module):
+    def __init__(self, n_classes, n_primitive):
         super().__init__()
 
         self.SA_ChannelOut = 512 + 256
 
-        in_channel = 3 + 3 + 2*2 + n_metatype*2
+        in_channel = 3 + 3 + 2*2 + n_primitive*2
 
-        self.preprocess = utils.full_connected_conv1d([3+3+2+n_metatype, 16, 32])
+        self.preprocess = utils.full_connected_conv1d([3+3+2+n_primitive, 16, 32])
 
         self.sa1 = Embed(n_center=1024, n_near=32, in_channel=(32+in_channel), mlp=[64, 64+8, 64+16], group_all=False)
         self.sa2 = Embed(n_center=512, n_near=32, in_channel=(32+in_channel) + (64+16), mlp=[64+32, 64+32+16, 128], group_all=False)
@@ -274,7 +274,7 @@ if __name__ == '__main__':
     edge_tensor = torch.rand(2, 2500, 2).cuda()
     meta_tensor = torch.rand(2, 2500, 4).cuda()
 
-    anet = CstNet_Cls(10, 4).cuda()
+    anet = CstNet(10, 4).cuda()
 
     pred = anet(xyz_tensor, eula_tensor, edge_tensor, meta_tensor)
 

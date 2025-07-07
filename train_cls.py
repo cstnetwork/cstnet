@@ -24,23 +24,19 @@ from sklearn.preprocessing import label_binarize
 
 from data_utils.ParamDataLoader import MCBDataLoader
 from data_utils.ParamDataLoader import save_confusion_mat
-from models.cstnet_cls import CstNet_Cls
+from models.cstnet_cls import CstNet
 from models.cst_pred import TriFeaPred_OrigValid
 
 
 def parse_args():
     '''PARAMETERS'''
     parser = argparse.ArgumentParser('training')
-    parser.add_argument('--gpu', type=str, default='0', help='specify gpu device')
-
     parser.add_argument('--batch_size', type=int, default=16, help='batch size in training')
     parser.add_argument('--epoch', default=200, type=int, help='number of epoch in training')
-    parser.add_argument('--learning_rate', default=0.001, type=float, help='learning rate in training')
-
-    parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer for training')
+    parser.add_argument('--lr', default=0.001, type=float, help='learning rate in training')
     parser.add_argument('--decay_rate', type=float, default=1e-4, help='decay rate')
 
-    parser.add_argument('--n_metatype', type=int, default=4, help='number of considered meta type')
+    parser.add_argument('--n_primitive', type=int, default=4, help='number of considered meta type')
     parser.add_argument('--num_point', type=int, default=2000, help='Point Number')
     parser.add_argument('--root_dataset', type=str, default=r'D:\document\DeepLearning\DataSet\MCB_PointCloud\MCBPcd_A', help='root of dataset')
 
@@ -84,8 +80,6 @@ def main(args):
     logger.addHandler(file_handler)
 
     '''HYPER PARAMETER'''
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-
     # 定义数据集，训练集及对应加载器
     train_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.num_point, is_train=True, data_augmentation=False)
     test_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.num_point, is_train=False, data_augmentation=False)
@@ -95,7 +89,7 @@ def main(args):
     testDataLoader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
     '''MODEL LOADING'''
-    classifier = CstNet_Cls(num_class, args.n_metatype)
+    classifier = CstNet(num_class, args.n_primitive)
 
     model_savepth = 'model_trained/' + save_str + '.pth'
     try:
@@ -106,7 +100,7 @@ def main(args):
 
     if is_use_pred_addattr:
         try:
-            predictor = TriFeaPred_OrigValid(n_points_all=args.num_point, n_metatype=args.n_metatype).cuda()
+            predictor = TriFeaPred_OrigValid(n_points_all=args.num_point, n_metatype=args.n_primitive).cuda()
             predictor.load_state_dict(torch.load('model_trained/TriFeaPred_ValidOrig_fuse.pth'))
             predictor = predictor.eval()
             print('load param attr predictor from', 'model_trained/TriFeaPred_ValidOrig_fuse.pth')
@@ -117,16 +111,13 @@ def main(args):
     classifier.apply(inplace_relu)
     classifier = classifier.cuda()
 
-    if args.optimizer == 'Adam':
-        optimizer = torch.optim.Adam(
-            classifier.parameters(),
-            lr=args.learning_rate, # 0.001
-            betas=(0.9, 0.999),
-            eps=1e-08,
-            weight_decay=args.decay_rate # 1e-4
-        )
-    else:
-        optimizer = torch.optim.SGD(classifier.parameters(), lr=0.01, momentum=0.9)
+    optimizer = torch.optim.Adam(
+        classifier.parameters(),
+        lr=args.lr,
+        betas=(0.9, 0.999),
+        eps=1e-08,
+        weight_decay=args.decay_rate
+    )
 
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
     global_epoch = 0
@@ -162,7 +153,7 @@ def main(args):
 
                 # <- is_nearby: [bs, npnt], meta_type: [bs, npnt]
                 nearby_label = F.one_hot(nearby_label, 2)
-                meta_type_label = F.one_hot(meta_type_label, args.n_metatype)
+                meta_type_label = F.one_hot(meta_type_label, args.n_primitive)
 
             optimizer.zero_grad()
 
@@ -233,7 +224,7 @@ def main(args):
                     meta_type_label = data[4].long().cuda()
 
                     nearby_label = F.one_hot(nearby_label, 2)
-                    meta_type_label = F.one_hot(meta_type_label, args.n_metatype)
+                    meta_type_label = F.one_hot(meta_type_label, args.n_primitive)
 
                 pred = classifier(points, eula_angle_label, nearby_label, meta_type_label)
 
