@@ -1,4 +1,4 @@
-# Constraint Learning for Parametric Point Cloud
+# Constraint-aware Feature Learning for Parametric Point Cloud
 Main modules: pytorch, pyocc
 
 ## Model scripts
