@@ -21,7 +21,7 @@ import numpy as np
 from data_utils.ParamDataLoader import ParamDataLoader
 from data_utils.ParamDataLoader import STEPMillionDataLoader
 
-from models.cst_pred import TriFeaPred_OrigValid
+from models.cst_pred import CstPnt
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument('--num_point', type=int, default=2500, help='Point Number')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer for training')
     parser.add_argument('--decay_rate', type=float, default=1e-4, help='decay rate')
-    parser.add_argument('--n_metatype', type=int, default=4, help='number of considered meta type')
+    parser.add_argument('--n_primitive', type=int, default=4, help='number of considered meta type')
     parser.add_argument('--workers', type=int, default=10, help='dataloader workers')
     parser.add_argument('--root_dataset', type=str, default=r'D:\document\DeepLearning\DataSet\STEPMillion\STEPMillion_pack1', help='root of dataset')
 
@@ -68,7 +68,7 @@ def main(args):
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=int(args.workers))  # , drop_last=True
 
     '''MODEL LOADING'''
-    predictor = TriFeaPred_OrigValid(n_points_all=args.num_point, n_metatype=args.n_metatype).cuda()
+    predictor = CstPnt(n_points_all=args.num_point, n_primitive=args.n_primitive).cuda()
 
     model_savepth = 'model_trained/' + save_str + '.pth'
     try:
@@ -122,7 +122,7 @@ def main(args):
             nearby_label = nearby_label.view(-1)
             loss_nearby = F.nll_loss(pred_edge_nearby, nearby_label)
 
-            pred_meta_type = pred_meta_type.contiguous().view(-1, args.n_metatype)
+            pred_meta_type = pred_meta_type.contiguous().view(-1, args.n_primitive)
             meta_type_label = meta_type_label.view(-1)
             loss_metatype = F.nll_loss(pred_meta_type, meta_type_label)
 

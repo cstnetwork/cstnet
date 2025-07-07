@@ -25,7 +25,7 @@ from sklearn.preprocessing import label_binarize
 from data_utils.ParamDataLoader import MCBDataLoader
 from data_utils.ParamDataLoader import save_confusion_mat
 from models.cstnet_cls import CstNet
-from models.cst_pred import TriFeaPred_OrigValid
+from models.cst_pred import CstPnt
 
 
 def parse_args():
@@ -100,7 +100,7 @@ def main(args):
 
     if is_use_pred_addattr:
         try:
-            predictor = TriFeaPred_OrigValid(n_points_all=args.num_point, n_metatype=args.n_primitive).cuda()
+            predictor = CstPnt(n_points_all=args.num_point, n_primitive=args.n_primitive).cuda()
             predictor.load_state_dict(torch.load('model_trained/TriFeaPred_ValidOrig_fuse.pth'))
             predictor = predictor.eval()
             print('load param attr predictor from', 'model_trained/TriFeaPred_ValidOrig_fuse.pth')
@@ -280,6 +280,5 @@ def main(args):
 
 
 if __name__ == '__main__':
-    args = parse_args()
-    main(args)
+    main(parse_args())
 

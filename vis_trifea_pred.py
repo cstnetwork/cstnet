@@ -27,7 +27,7 @@ from pathlib import Path
 # from models.TriFeaPred import TriFeaPred
 from data_utils.ParamDataLoader import ParamDataLoader
 from data_utils.ParamDataLoader import STEPMillionDataLoader
-from models.cst_pred import TriFeaPred_OrigValid
+from models.cst_pred import CstPnt
 from data_utils.ModelNetDataLoader import ModelNetDataLoader
 
 
@@ -291,7 +291,7 @@ def main(args):
     eval_dataloader = torch.utils.data.DataLoader(eval_dataset, batch_size=args.batch_size, shuffle=True, num_workers=int(args.workers))  # , drop_last=True
 
     '''MODEL LOADING'''
-    predictor = TriFeaPred_OrigValid(n_points_all=args.num_point, n_metatype=args.n_metatype).cuda()
+    predictor = CstPnt(n_points_all=args.num_point, n_primitive=args.n_metatype).cuda()
 
     model_savepth = 'model_trained/' + save_str + '.pth'
     try:

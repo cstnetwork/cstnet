@@ -198,8 +198,8 @@ class FeaPropagate(nn.Module):
         return new_points
 
 
-class TriFeaPred_OrigValid(nn.Module):
-    def __init__(self, n_points_all, n_metatype, n_embout=256, n_neighbor=100, n_stepk=10):
+class CstPnt(nn.Module):
+    def __init__(self, n_points_all, n_primitive, n_embout=256, n_neighbor=100, n_stepk=10):
         super().__init__()
 
         self.n_neighbor = n_neighbor
@@ -221,7 +221,7 @@ class TriFeaPred_OrigValid(nn.Module):
 
         self.edge_nearby = full_connected_conv1d([n_embout, 256, 128, 32, 2])
 
-        self.meta_type = full_connected_conv1d([n_embout, 256, 128, 64, n_metatype])
+        self.meta_type = full_connected_conv1d([n_embout, 256, 128, 64, n_primitive])
 
     def forward(self, xyz):
         xyz = xyz.transpose(1, -1)
@@ -237,9 +237,6 @@ class TriFeaPred_OrigValid(nn.Module):
         l0_points = self.fp1(l0_xyz, l1_xyz, torch.cat([l0_xyz, l0_points], 1), l1_points)
 
         # FC layers
-        # feat = self.conv1(l0_points)
-        # feat = feat.permute(0, 2, 1)
-
         feat = F.relu(self.bn1(self.conv1(l0_points)))
         feat = self.drop1(feat)
         feat = self.conv2(feat)
