@@ -145,7 +145,6 @@ class STEPMillionDataLoader(Dataset):
 
 
 class MCBDataLoader(Dataset):
-
     def __init__(self,
                  root=r'D:\document\DeepLearning\DataSet\MCB_PointCloud\MCBPcd_A',
                  is_train=True,

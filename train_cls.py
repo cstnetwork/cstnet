@@ -4,13 +4,6 @@ train classification
 """
 
 import os
-import sys
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = BASE_DIR
-
-sys.path.append(os.path.join(ROOT_DIR, 'models'))
-sys.path.append(os.path.join(ROOT_DIR, 'data_utils'))
-
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -18,14 +11,11 @@ from datetime import datetime
 import logging
 import argparse
 from tqdm import tqdm
-from sklearn.metrics import f1_score
-from sklearn.metrics import average_precision_score
-from sklearn.preprocessing import label_binarize
 
 from data_utils.ParamDataLoader import MCBDataLoader
-from data_utils.ParamDataLoader import save_confusion_mat
 from models.cstnet_cls import CstNet
 from models.cst_pred import CstPnt
+from models.utils import all_metric_cls
 
 
 def parse_args():
@@ -37,7 +27,7 @@ def parse_args():
     parser.add_argument('--decay_rate', type=float, default=1e-4, help='decay rate')
 
     parser.add_argument('--n_primitive', type=int, default=4, help='number of considered meta type')
-    parser.add_argument('--num_point', type=int, default=2000, help='Point Number')
+    parser.add_argument('--n_point', type=int, default=2000, help='Point Number')
     parser.add_argument('--root_dataset', type=str, default=r'D:\document\DeepLearning\DataSet\MCB_PointCloud\MCBPcd_A', help='root of dataset')
 
     return parser.parse_args()
@@ -81,8 +71,8 @@ def main(args):
 
     '''HYPER PARAMETER'''
     # 定义数据集，训练集及对应加载器
-    train_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.num_point, is_train=True, data_augmentation=False)
-    test_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.num_point, is_train=False, data_augmentation=False)
+    train_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.n_point, is_train=True, data_augmentation=False)
+    test_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.n_point, is_train=False, data_augmentation=False)
     num_class = len(train_dataset.classes)
 
     trainDataLoader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
@@ -100,7 +90,7 @@ def main(args):
 
     if is_use_pred_addattr:
         try:
-            predictor = CstPnt(n_points_all=args.num_point, n_primitive=args.n_primitive).cuda()
+            predictor = CstPnt(n_points_all=args.n_point, n_primitive=args.n_primitive).cuda()
             predictor.load_state_dict(torch.load('model_trained/TriFeaPred_ValidOrig_fuse.pth'))
             predictor = predictor.eval()
             print('load param attr predictor from', 'model_trained/TriFeaPred_ValidOrig_fuse.pth')
@@ -120,163 +110,81 @@ def main(args):
     )
 
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
-    global_epoch = 0
-    global_step = 0
-    best_instance_accu = -1.0
 
     '''TRANING'''
-    start_epoch = 0
-    for epoch in range(start_epoch, args.epoch):
-        logstr_epoch = 'Epoch %d (%d/%s):' % (global_epoch + 1, epoch + 1, args.epoch)
-        mean_correct = []
+    for epoch in range(args.epoch):
+        logstr_epoch = 'Epoch %d/%d:' % (epoch + 1, args.epoch)
+        all_preds = []
+        all_labels = []
+
         classifier = classifier.train()
-
-        pred_cls = []
-        target_cls = []
-
-        total_samples = torch.zeros(num_class).cuda()
-        positive_samples = torch.zeros(num_class).cuda()
-
         for batch_id, data in tqdm(enumerate(trainDataLoader, 0), total=len(trainDataLoader)):
             points = data[0].cuda()
             target = data[1].long().cuda()
 
             if is_use_pred_addattr:
-                eula_angle_label, nearby_label, meta_type_label = predictor(points)
-                nearby_label, meta_type_label = torch.exp(nearby_label), torch.exp(meta_type_label)
-                eula_angle_label, nearby_label, meta_type_label = eula_angle_label.detach(), nearby_label.detach(), meta_type_label.detach()
+                mad, adj, pt = predictor(points)
+                adj, pt = torch.exp(adj), torch.exp(pt)
+                mad, adj, pt = mad.detach(), adj.detach(), pt.detach()
 
             else:
-                eula_angle_label = data[2].float().cuda()
-                nearby_label = data[3].long().cuda()
-                meta_type_label = data[4].long().cuda()
+                mad = data[2].float().cuda()
+                adj = data[3].long().cuda()
+                pt = data[4].long().cuda()
 
-                # <- is_nearby: [bs, npnt], meta_type: [bs, npnt]
-                nearby_label = F.one_hot(nearby_label, 2)
-                meta_type_label = F.one_hot(meta_type_label, args.n_primitive)
+                # <- adj: [bs, npnt], pt: [bs, npnt]
+                adj = F.one_hot(adj, 2)
+                pt = F.one_hot(pt, args.n_primitive)
 
             optimizer.zero_grad()
 
-            pred = classifier(points, eula_angle_label, nearby_label, meta_type_label)
+            pred = classifier(points, mad, adj, pt)
             loss = F.nll_loss(pred, target)
 
             loss.backward()
             optimizer.step()
-            global_step += 1
 
-            pred_choice = pred.data.max(1)[1]
-            correct = pred_choice.eq(target.long().data).cpu().sum()
-            mean_correct.append(correct.item() / float(points.size()[0]))
+            all_preds.append(pred.detach().cpu().numpy())
+            all_labels.append(target.detach().cpu().numpy())
 
-            for class_idx in range(num_class):
-                total_samples[class_idx] += (target == class_idx).sum()
+        all_metric_train = all_metric_cls(all_preds, all_labels)
 
-                predicted_classes = torch.argmax(pred, dim=1)
-                positive_samples[class_idx] += ((target == class_idx) & (predicted_classes == class_idx)).sum()
-
-            pred_cls += pred_choice.tolist()
-            target_cls += target.tolist()
-
-        save_confusion_mat(pred_cls, target_cls, os.path.join(confusion_dir, f'train-{epoch}.png'))
-
-        all_preds = torch.Tensor(pred_cls)
-        all_labels = torch.Tensor(target_cls)
-
-        acc_over_class = accuracy_over_class(all_labels, all_preds, num_class)
-
-        all_preds = all_preds.numpy()
-        all_labels = all_labels.numpy()
-        macro_f1_score = f1_score(all_labels, all_preds, average='weighted')
-
-        train_instance_acc = np.mean(mean_correct)
-        logstr_trainaccu = f'\ttrain_instance_accu:\t{train_instance_acc}\ttrain_class_accu:\t{acc_over_class}\ttrain_F1_Score:\t{macro_f1_score}'
+        logstr_trainaccu = f'\ttrain_instance_accu:\t{all_metric_train[0]}\ttrain_class_accu:\t{all_metric_train[1]}\ttrain_F1_Score:\t{all_metric_train[2]}\tmAP\t{all_metric_train[3]}'
         scheduler.step()
-        global_epoch += 1
         torch.save(classifier.state_dict(), 'model_trained/' + save_str + '.pth')
 
         with torch.no_grad():
-            total_correct = 0
-            total_testset = 0
-
-            classifier = classifier.eval()
-
-            pred_cls = []
-            target_cls = []
-
             all_preds = []
             all_labels = []
 
-            total_samples = torch.zeros(num_class).cuda()
-            positive_samples = torch.zeros(num_class).cuda()
-
+            classifier = classifier.eval()
             for j, data in tqdm(enumerate(testDataLoader), total=len(testDataLoader)):
                 points = data[0].cuda()
                 target = data[1].long().cuda()
 
                 if is_use_pred_addattr:
-                    eula_angle_label, nearby_label, meta_type_label = predictor(points)
-                    nearby_label, meta_type_label = torch.exp(nearby_label), torch.exp(meta_type_label)
-                    eula_angle_label, nearby_label, meta_type_label = eula_angle_label.detach(), nearby_label.detach(), meta_type_label.detach()
+                    mad, adj, pt = predictor(points)
+                    adj, pt = torch.exp(adj), torch.exp(pt)
+                    mad, adj, pt = mad.detach(), adj.detach(), pt.detach()
 
                 else:
-                    eula_angle_label = data[2].float().cuda()
-                    nearby_label = data[3].long().cuda()
-                    meta_type_label = data[4].long().cuda()
+                    mad = data[2].float().cuda()
+                    adj = data[3].long().cuda()
+                    pt = data[4].long().cuda()
 
-                    nearby_label = F.one_hot(nearby_label, 2)
-                    meta_type_label = F.one_hot(meta_type_label, args.n_primitive)
+                    adj = F.one_hot(adj, 2)
+                    pt = F.one_hot(pt, args.n_primitive)
 
-                pred = classifier(points, eula_angle_label, nearby_label, meta_type_label)
+                pred = classifier(points, mad, adj, pt)
 
                 all_preds.append(pred.detach().cpu().numpy())
                 all_labels.append(target.detach().cpu().numpy())
 
-                pred_choice = pred.data.max(1)[1]
-                correct = pred_choice.eq(target.data).cpu().sum()
-                total_correct += correct.item()
-                total_testset += points.size()[0]
+            all_metric_test = all_metric_cls(all_preds, all_labels)
+            accustr = f'\ttest_instance_accuracy\t{all_metric_test[0]}\ttest_class_accuracy\t{all_metric_test[1]}\ttest_F1_Score\t{all_metric_test[2]}\tmAP\t{all_metric_test[3]}'
 
-                for class_idx in range(num_class):
-                    total_samples[class_idx] += (target == class_idx).sum()
-
-                    predicted_classes = torch.argmax(pred, dim=1)
-                    positive_samples[class_idx] += ((target == class_idx) & (predicted_classes == class_idx)).sum()
-
-                pred_cls += pred_choice.tolist()
-                target_cls += target.tolist()
-
-            save_confusion_mat(pred_cls, target_cls, os.path.join(confusion_dir, f'eval-{epoch}.png'))
-
-            all_preds = np.vstack(all_preds)
-            all_labels = np.hstack(all_labels)
-
-            all_labels_bin = label_binarize(all_labels, classes=np.arange(num_class))
-
-            ap_scores = []
-            for i in range(num_class):
-                ap = average_precision_score(all_labels_bin[:, i], all_preds[:, i])
-                ap_scores.append(ap)
-
-            mAP = np.mean(ap_scores)
-
-            acc_over_instance = total_correct / float(total_testset)
-
-            all_preds = torch.Tensor(pred_cls)
-            all_labels = torch.Tensor(target_cls)
-
-            acc_over_class = accuracy_over_class(all_labels, all_preds, num_class)
-
-            all_preds = all_preds.numpy()
-            all_labels = all_labels.numpy()
-            macro_f1_score = f1_score(all_labels, all_preds, average='weighted')
-
-            accustr = f'\ttest_instance_accuracy\t{acc_over_instance}\ttest_class_accuracy\t{acc_over_class}\ttest_F1_Score\t{macro_f1_score}\tmAP\t{mAP}'
             print(accustr)
             logger.info(logstr_epoch + logstr_trainaccu + accustr)
-
-            if best_instance_accu < acc_over_class:
-                best_instance_accu = acc_over_class
-                torch.save(classifier.state_dict(), 'model_trained/best_' + save_str + '.pth')
 
 
 if __name__ == '__main__':

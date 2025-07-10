@@ -7,6 +7,8 @@ import torch.nn.functional as F
 import time
 from scipy.interpolate import griddata
 import math
+from sklearn.metrics import f1_score, average_precision_score
+from sklearn.preprocessing import label_binarize
 
 import pymeshlab
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -152,379 +154,6 @@ class full_connected(nn.Module):
         return fea
 
 
-class SA_Attention(nn.Module):
-    def __init__(self, n_center, n_near, in_channel, mlp):
-        super().__init__()
-
-        self.n_center = n_center
-        self.n_near = n_near
-        self.mlp_convs = nn.ModuleList()
-        self.mlp_bns = nn.ModuleList()
-        last_channel = in_channel
-
-        for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
-            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
-            last_channel = out_channel
-
-    def forward(self, xyz, points):
-        xyz = xyz.permute(0, 2, 1)
-
-        if points is not None:
-            points = points.permute(0, 2, 1)
-
-        new_xyz, new_points = SA_SampleAndGroup(self.n_center, self.n_near, xyz, points)
-
-        new_points = new_points.permute(0, 3, 2, 1).to(torch.float)  # [B, C+D, nsample,npoint]
-        for i, conv in enumerate(self.mlp_convs):
-            bn = self.mlp_bns[i]
-            new_points = F.relu(bn(conv(new_points)))
-
-        new_points = torch.max(new_points, 2)[0]
-        new_xyz = new_xyz.permute(0, 2, 1)
-
-        return new_xyz, new_points
-
-
-class SetAbstraction(nn.Module):
-    def __init__(self, n_center, n_near, in_channel, mlp):
-        super().__init__()
-
-        self.n_center = n_center
-        self.n_near = n_near
-        self.mlp_convs = nn.ModuleList()
-        self.mlp_bns = nn.ModuleList()
-        last_channel = in_channel
-
-        for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
-            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
-            last_channel = out_channel
-
-    def forward(self, xyz, points):
-        xyz = xyz.permute(0, 2, 1)
-
-        if points is not None:
-            points = points.permute(0, 2, 1)
-
-        new_xyz, new_points = SA_SampleAndGroup(self.n_center, self.n_near, xyz, points)
-
-        new_points = new_points.permute(0, 3, 2, 1).to(torch.float)  # [B, C+D, nsample, npoint]
-        for i, conv in enumerate(self.mlp_convs):
-            bn = self.mlp_bns[i]
-            new_points = F.relu(bn(conv(new_points)))
-
-        new_points = torch.max(new_points, 2)[0]
-        new_xyz = new_xyz.permute(0, 2, 1)
-
-        return new_xyz, new_points
-
-
-class SA_Scratch(nn.Module):
-    def __init__(self, n_center, n_near, in_channel, mlp):
-        super().__init__()
-
-        self.n_center = n_center
-        self.n_near = n_near
-        self.mlp_convs = nn.ModuleList()
-        self.mlp_bns = nn.ModuleList()
-        last_channel = in_channel
-
-        for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
-            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
-            last_channel = out_channel
-
-    def forward(self, xyz, fea):
-        xyz = xyz.permute(0, 2, 1)
-
-        if fea is not None:
-            fea = fea.permute(0, 2, 1)
-
-        new_xyz, new_fea = SA_SampleAndGroup(self.n_center, self.n_near, xyz, fea)
-
-        new_fea = new_fea.permute(0, 3, 2, 1).to(torch.float)  # [B, C+D, n_near, n_center]
-        for i, conv in enumerate(self.mlp_convs):
-            bn = self.mlp_bns[i]
-            new_fea = F.relu(bn(conv(new_fea)))
-
-        new_fea = torch.max(new_fea, 2)[0]
-        new_xyz = new_xyz.permute(0, 2, 1)
-
-        return new_xyz, new_fea
-
-
-class SA_Attention_test3(nn.Module):
-    def __init__(self, n_center, n_near, dim_in, mlp, dim_qkv):
-        super().__init__()
-
-        self.n_center = n_center
-        self.n_near = n_near
-        self.mlp_convs = nn.ModuleList()
-        self.mlp_bns = nn.ModuleList()
-        last_channel = dim_in
-
-        for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
-            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
-            last_channel = out_channel
-
-        self.matq = nn.Conv2d(last_channel, dim_qkv, 1, bias=False)
-        self.matk = nn.Conv2d(last_channel, dim_qkv, 1, bias=False)
-        self.matv = nn.Conv2d(last_channel, dim_qkv, 1, bias=False)
-
-        self.pos_mlp = full_connected_conv2d([last_channel, last_channel, dim_qkv])
-        self.weight_mlp = full_connected_conv2d([dim_qkv, dim_qkv, dim_qkv])
-
-        self.fea_final = full_connected_conv1d([dim_qkv, dim_qkv, dim_qkv])
-
-    def forward(self, xyz, fea):
-        new_xyz, new_fea, new_fea_center = SA_SampleAndGroup(self.n_center, self.n_near, xyz, fea, is_backecenter=True)
-        #        new_fea -> [bs, n_center, n_near, 3+emb_in]
-        # new_fea_center -> [bs, n_center, 1     , 3+emb_in]
-
-        new_fea = new_fea.permute(0, 3, 2, 1).to(torch.float)  # -> [B, C+D, n_near, n_center]
-        new_fea_center = new_fea_center.permute(0, 3, 2, 1).to(torch.float)  # -> [B, C+D, 1, n_center]
-
-        for i, conv in enumerate(self.mlp_convs):
-            bn = self.mlp_bns[i]
-            new_fea = F.relu(bn(conv(new_fea)))
-            new_fea_center = F.relu(bn(conv(new_fea_center)))
-
-        center_fea_orig = new_fea_center
-        # ->[bs, emb_in, 1, n_center]
-
-        grouped_fea = new_fea
-        # ->[bs, emb_in, n_near, n_center]
-
-        center_q = self.matq(center_fea_orig)
-        center_k = self.matk(center_fea_orig)
-        # ->[bs, dim_qkv, 1, n_center]
-
-        near_k = self.matk(grouped_fea)
-        # ->[bs, dim_qkv, n_near, n_center]
-
-        center_v = self.matv(center_fea_orig)
-        # ->[bs, dim_qkv, 1, n_center]
-
-        near_v = self.matv(grouped_fea)
-        # ->[bs, dim_qkv, n_near, n_center]
-
-        cen_near_k = torch.cat([center_k, near_k], dim=2)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        cen_near_v = torch.cat([center_v, near_v], dim=2)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        emb_pos = self.pos_mlp(center_fea_orig - torch.cat([center_fea_orig, grouped_fea], dim=2))
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        # MLP(q - k + delta)
-        emb_weight = self.weight_mlp(center_q - cen_near_k + emb_pos)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        emb_weight = F.softmax(emb_weight, dim=2)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        center_fea = emb_weight * (cen_near_v + emb_pos)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        center_fea = torch.sum(center_fea, dim=2)
-        # ->[bs, dim_qkv, n_center]
-
-        center_fea = self.fea_final(center_fea)
-        # ->[bs, dim_out, n_center]
-
-        center_fea = center_fea.permute(0, 2, 1)
-        # ->[bs, n_center, dim_out]
-
-        return center_fea, new_fea
-
-
-class SA_Attention_test2(nn.Module):
-    def __init__(self, n_center, n_near, dim_in, dim_qk, dim_v, mlp: list):
-        super().__init__()
-
-        self.n_center = n_center
-        self.n_near = n_near
-
-        self.matq = nn.Conv2d(dim_in, dim_qk, 1, bias=False)
-        self.matk = nn.Conv2d(dim_in, dim_qk, 1, bias=False)
-        self.matv = nn.Conv2d(dim_in, dim_v, 1, bias=False)
-
-        self.fea_final = full_connected_conv1d(mlp)
-
-    def forward(self, xyz, fea):
-        idx_surfknn_all = surface_knn(xyz, self.n_near, 10)
-
-        if self.n_center is None:
-            center_xyz = xyz
-            center_fea_orig = fea
-            idx = idx_surfknn_all
-            grouped_xyz = index_points(xyz, idx_surfknn_all)
-
-        else:
-            fps_idx = farthest_point_sample(xyz, self.n_center)
-            center_xyz = index_points(xyz, fps_idx)
-            center_fea_orig = index_points(fea, fps_idx)
-            idx = index_points(idx_surfknn_all, fps_idx)
-            grouped_xyz = index_points(xyz, idx)  # [B, n_center, n_near, 3]
-
-        if fea is not None:
-            grouped_fea = index_points(fea, idx)
-        else:
-            grouped_fea = grouped_xyz  # [B, n_center, n_near, dim_in]
-
-        center_fea_orig_forcat = center_fea_orig
-        center_fea_orig = center_fea_orig.unsqueeze(2)
-        # <-[bs, n_center, dim_in]
-        # ->[bs, n_center, 1, dim_in]
-
-        center_fea_orig = center_fea_orig.permute(0, 3, 2, 1)
-        # ->[bs, dim_in, 1, n_center]
-
-        grouped_fea = grouped_fea.permute(0, 3, 2, 1)
-        # ->[bs, dim_in, n_near, n_center]
-
-        center_q = self.matq(center_fea_orig)
-        center_k = self.matk(center_fea_orig)
-        # ->[bs, dim_qk, 1, n_center]
-
-        near_k = self.matk(grouped_fea)
-        # ->[bs, dim_qk, n_near, n_center]
-
-        center_v = self.matv(center_fea_orig)
-        # ->[bs, dim_v, 1, n_center]
-
-        near_v = self.matv(grouped_fea)
-        # ->[bs, dim_v, n_near, n_center]
-
-        cen_near_k = torch.cat([center_k, near_k], dim=2)
-        # ->[bs, dim_qk, 1 + n_near, n_center]
-
-        cen_near_v = torch.cat([center_v, near_v], dim=2)
-        # ->[bs, dim_v, 1 + n_near, n_center]
-
-        # q * k
-        q_dot_k = torch.sum(center_q * cen_near_k, dim=1, keepdim=True)
-        # ->[bs, 1, 1 + n_near, n_center]
-        q_dot_k = F.softmax(q_dot_k, dim=2)
-
-        # (q dot k) * v
-        weighted_v = q_dot_k * cen_near_v
-        # ->[bs, dim_v, 1 + n_near, n_center]
-
-        # 求属性加权和
-        center_fea = torch.sum(weighted_v, dim=2)
-        # ->[bs, dim_v, n_center]
-
-        center_fea = self.fea_final(center_fea)
-        # ->[bs, dim_out, n_center]
-
-        center_fea = center_fea.permute(0, 2, 1)
-        # ->[bs, n_center, dim_out]
-
-        center_fea = torch.cat([center_fea_orig_forcat, center_fea], dim=-1)
-        # ->[bs, n_center, emb_in + dim_out]
-
-        return center_xyz, center_fea
-
-
-class SA_Attention_test1(nn.Module):
-    def __init__(self, n_center, n_near, dim_in, dim_qkv, mlp: list):
-        super().__init__()
-
-        self.n_center = n_center
-        self.n_near = n_near
-
-        self.matq = nn.Conv2d(dim_in, dim_qkv, 1, bias=False)
-        self.matk = nn.Conv2d(dim_in, dim_qkv, 1, bias=False)
-        self.matv = nn.Conv2d(dim_in, dim_qkv, 1, bias=False)
-
-        self.pos_mlp = full_connected_conv2d([dim_in, dim_in, dim_qkv])
-        self.weight_mlp = full_connected_conv2d([dim_qkv, dim_qkv, dim_qkv])
-
-        self.fea_final = full_connected_conv1d(mlp)
-
-    def forward(self, xyz, fea):
-        idx_surfknn_all = surface_knn(xyz, self.n_near, 10)
-
-        if self.n_center is None:
-            center_xyz = xyz
-            center_fea_orig = fea
-            idx = idx_surfknn_all
-            grouped_xyz = index_points(xyz, idx_surfknn_all)
-
-        else:
-            fps_idx = farthest_point_sample(xyz, self.n_center)
-            center_xyz = index_points(xyz, fps_idx)
-            center_fea_orig = index_points(fea, fps_idx)
-            idx = index_points(idx_surfknn_all, fps_idx)
-            grouped_xyz = index_points(xyz, idx)  # [B, n_center, n_near, 3]
-
-        if fea is not None:
-            grouped_fea = index_points(fea, idx)
-        else:
-            grouped_fea = grouped_xyz  # [B, n_center, n_near, emb_in]
-
-        center_fea_orig_forcat = center_fea_orig
-        center_fea_orig = center_fea_orig.unsqueeze(2)
-        # <-[bs, n_center, emb_in]
-        # ->[bs, n_center, 1, emb_in]
-
-        center_fea_orig = center_fea_orig.permute(0, 3, 2, 1)
-        # ->[bs, emb_in, 1, n_center]
-
-        grouped_fea = grouped_fea.permute(0, 3, 2, 1)
-        # ->[bs, emb_in, n_near, n_center]
-
-        center_q = self.matq(center_fea_orig)
-        center_k = self.matk(center_fea_orig)
-        # ->[bs, dim_qkv, 1, n_center]
-
-        near_k = self.matk(grouped_fea)
-        # ->[bs, dim_qkv, n_near, n_center]
-
-        center_v = self.matv(center_fea_orig)
-        # ->[bs, dim_qkv, 1, n_center]
-
-        near_v = self.matv(grouped_fea)
-        # ->[bs, dim_qkv, n_near, n_center]
-
-        cen_near_k = torch.cat([center_k, near_k], dim=2)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        cen_near_v = torch.cat([center_v, near_v], dim=2)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        emb_pos = self.pos_mlp(center_fea_orig - torch.cat([center_fea_orig, grouped_fea], dim=2))
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        # MLP(q - k + delta)
-        emb_weight = self.weight_mlp(center_q - cen_near_k + emb_pos)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        emb_weight = F.softmax(emb_weight, dim=2)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        center_fea = emb_weight * (cen_near_v + emb_pos)
-        # ->[bs, dim_qkv, 1 + n_near, n_center]
-
-        center_fea = torch.sum(center_fea, dim=2)
-        # ->[bs, dim_qkv, n_center]
-
-        center_fea = self.fea_final(center_fea)
-        # ->[bs, dim_out, n_center]
-
-        center_fea = center_fea.permute(0, 2, 1)
-        # ->[bs, n_center, dim_out]
-
-        center_fea = torch.cat([center_fea_orig_forcat, center_fea], dim=-1)
-        # ->[bs, n_center, emb_in + dim_out]
-
-        return center_xyz, center_fea
-
-
 def index_points(points, idx, is_label: bool = False):
     device = points.device
     B = points.shape[0]
@@ -540,134 +169,6 @@ def index_points(points, idx, is_label: bool = False):
         new_points = points[batch_indices, idx, :]
 
     return new_points
-
-
-class FeaPropagate(nn.Module):
-    def __init__(self, in_channel, mlp):  # fp1: in_channel=150, mlp=[128, 128]
-        super().__init__()
-        self.mlp_convs = nn.ModuleList()
-        self.mlp_bns = nn.ModuleList()
-        last_channel = in_channel
-        for out_channel in mlp:
-            self.mlp_convs.append(nn.Conv1d(last_channel, out_channel, 1))
-            self.mlp_bns.append(nn.BatchNorm1d(out_channel))
-            last_channel = out_channel
-
-    def forward(self, xyz1, xyz2, points1, points2):
-        xyz1 = xyz1.permute(0, 2, 1)
-        xyz2 = xyz2.permute(0, 2, 1)
-        points2 = points2.permute(0, 2, 1)
-
-        B, N, C = xyz1.shape
-        _, S, _ = xyz2.shape
-
-        if S == 1:
-            interpolated_points = points2.repeat(1, N, 1)
-        else:
-            dists = square_distance(xyz1, xyz2)
-            dists, idx = dists.sort(dim=-1)
-            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
-            dist_recip = 1.0 / (dists + 1e-8)
-            norm = torch.sum(dist_recip, dim=2, keepdim=True)
-            weight = dist_recip / norm  # ->[B, N, 3]
-            interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2)
-
-        if points1 is not None:
-            # skip link concatenation
-            points1 = points1.permute(0, 2, 1)
-            new_points = torch.cat([points1, interpolated_points], dim=-1)
-        else:
-            new_points = interpolated_points
-
-        new_points = new_points.permute(0, 2, 1)
-        for i, conv in enumerate(self.mlp_convs):
-            bn = self.mlp_bns[i]
-            new_points = F.relu(bn(conv(new_points)))
-
-        return new_points
-
-
-def square_distance(src, dst):
-    B, N, _ = src.shape
-    _, M, _ = dst.shape
-    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    dist += torch.sum(src ** 2, -1).view(B, N, 1)
-    dist += torch.sum(dst ** 2, -1).view(B, 1, M)
-    return dist
-
-
-def SA_SampleAndGroup(n_center, n_near, xyz, fea, is_backecenter=False):
-    idx_surfknn_all = surface_knn(xyz, n_near, 10)
-
-    if n_center is None:
-        new_xyz = xyz
-        idx = idx_surfknn_all
-        grouped_xyz = index_points(xyz, idx_surfknn_all)
-
-    else:
-        fps_idx = farthest_point_sample(xyz, n_center)
-        new_xyz = index_points(xyz, fps_idx)
-        idx = index_points(idx_surfknn_all, fps_idx)
-        grouped_xyz = index_points(xyz, idx)
-
-    grouped_xyz_norm = grouped_xyz - new_xyz.unsqueeze(2)
-
-    if fea is not None:
-        grouped_fea = index_points(fea, idx)
-        new_fea = torch.cat([grouped_xyz_norm, grouped_fea], dim=-1)  # [B, npoint, nsample, C+D]
-    else:
-        new_fea = grouped_xyz_norm
-
-    if is_backecenter:
-        if n_center is None:
-            new_fea_center = fea
-        else:
-            new_fea_center = index_points(fea, fps_idx)
-
-        grouped_xyz_norm_center = torch.zeros_like(new_xyz)
-        # ->[bs, n_center, 3]
-
-        new_fea_center = torch.cat([grouped_xyz_norm_center, new_fea_center], dim=-1).unsqueeze(2)
-        # ->[bs, n_center, 1, 3+emb_in]
-
-        return new_xyz, new_fea, new_fea_center
-    else:
-        return new_xyz, new_fea
-
-
-def farthest_point_sample(xyz, n_samples):
-    device = xyz.device
-
-    # xyz: [24, 1024, 3], B: batch_size, N: number of points, C: channels
-    B, N, C = xyz.shape
-
-    centroids = torch.zeros(B, n_samples, dtype=torch.long).to(device)
-
-    distance = torch.ones(B, N).to(device) * 1e10
-
-    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
-
-    batch_indices = torch.arange(B, dtype=torch.long).to(device)
-
-    for i in range(n_samples):
-        centroids[:, i] = farthest
-
-        # print('batch_indices', batch_indices.shape)
-        # print('farthest', farthest.shape)
-        # print('xyz', xyz[batch_indices, farthest, :].shape)
-        # exit()
-
-        centroid = xyz[batch_indices, farthest, :].view(B, 1, 3)
-
-        # print('xyz', xyz.shape)
-        # print('centroid', centroid.shape)
-        # exit()
-
-        dist = torch.sum((xyz - centroid) ** 2, -1)
-        mask = dist < distance
-        distance[mask] = dist[mask].float()
-        farthest = torch.max(distance, -1)[1]
-    return centroids
 
 
 def get_neighbor_index(vertices: "(bs, vertice_num, 3)",  neighbor_num: int, is_backdis: bool = False):
@@ -755,43 +256,59 @@ def surface_knn(points_all: "(bs, n_pnts, 3)", k_near: int = 100, n_stepk = 10):
     return new_neighinds
 
 
+def all_metric_cls(all_preds: list, all_labels: list):
+    """
+    计算分类评价指标：Acc.instance, Acc.class, F1-score, mAP
+    :param all_preds: [item0, item1, ...], item: [bs, n_classes]
+    :param all_labels: [item0, item1, ...], item: [bs, ]， 其中必须保存整形数据
+    :return: Acc.instance, Acc.class, F1-score-macro, F1-score-weighted, mAP
+    """
+    # 将所有batch的预测和真实标签整合在一起
+    all_preds = np.vstack(all_preds)  # 形状为 [n_samples, n_classes]
+    all_labels = np.hstack(all_labels)  # 形状为 [n_samples]
+    n_samples, n_classes = all_preds.shape
+
+    # 确保all_labels中保存的为整形数据
+    if not np.issubdtype(all_labels.dtype, np.integer):
+        raise TypeError('all_labels 中保存了非整形数据')
+
+    # ---------- 计算 Acc.Instance ----------
+    pred_choice = np.argmax(all_preds, axis=1)  # -> [n_samples, ]
+    correct = np.equal(pred_choice, all_labels).sum()
+    acc_ins = correct / n_samples
+
+    # ---------- 计算 Acc.class ----------
+    acc_cls = []
+    for class_idx in range(n_classes):
+        class_mask = (all_labels == class_idx)
+        if np.sum(class_mask) == 0:
+            continue
+        cls_acc_sig = np.mean(pred_choice[class_mask] == all_labels[class_mask])
+        acc_cls.append(cls_acc_sig)
+    acc_cls = np.mean(acc_cls)
+
+    # ---------- 计算 F1-score ----------
+    f1_m = f1_score(all_labels, pred_choice, average='macro')
+    f1_w = f1_score(all_labels, pred_choice, average='weighted')
+
+    # ---------- 计算 mAP ----------
+    all_labels_one_hot = label_binarize(all_labels, classes=np.arange(n_classes))
+
+    if n_classes == 2:
+        all_labels_one_hot_rev = 1 - all_labels_one_hot
+        all_labels_one_hot = np.concatenate([all_labels_one_hot_rev, all_labels_one_hot], axis=1)
+
+    ap_sig = []
+    # 计算单个类别的 ap
+    for i in range(n_classes):
+        ap = average_precision_score(all_labels_one_hot[:, i], all_preds[:, i])
+        ap_sig.append(ap)
+
+    mAP = np.mean(ap_sig)
+
+    return acc_ins, acc_cls, f1_m, f1_w, mAP
+
+
 if __name__ == '__main__':
 
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    #
-    # origin = (0, 0, 0)
-    # size = (3, 2, 1)
-    #
-    # plot_rectangular_prism(ax, origin, size)
-    #
-    # ax.set_xlabel('X')
-    # ax.set_ylabel('Y')
-    # ax.set_zlabel('Z')
-    #
-    # ax.set_xlim([0, 5])
-    # ax.set_ylim([0, 5])
-    # ax.set_zlim([0, 5])
-    #
-    # plt.show()
-
-    # vis_stl(r'C:\Users\ChengXi\Desktop\hardreads\cuboid.stl')
-
-    # test()
-
-    # surf_knn_pral()
-    # show_surfknn_paper1()
-    # show_surfknn_paper2()
-    # show_surfknn_paper3()
-    # show_surfknn_paper4()
-
-    # teat_star()
-    # test_where()
-    # test_surfknn_testv2()
-    # test_batch_indexes()
-    # patch_interpolate()
-    # test_unique()
-    # test_knn2()
-
-    # show_different_weight_paper()
     pass
