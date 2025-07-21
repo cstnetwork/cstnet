@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 import argparse
 
-from data_utils.ParamDataLoader import STEPMillionDataLoader
+from data_utils.Param20KDataset import STEPMillionDataLoader
 from models.cstpnt import CstPnt
 
 

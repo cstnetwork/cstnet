@@ -10,7 +10,7 @@ import logging
 import argparse
 from tqdm import tqdm
 
-from data_utils.ParamDataLoader import MCBDataLoader
+from data_utils.Param20KDataset import MCBDataLoader
 from models.cstnet_s2 import CstNetS2
 from models.cstpnt import CstPnt
 from models.utils import all_metric_cls
