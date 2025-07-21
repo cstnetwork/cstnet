@@ -13,8 +13,8 @@ import argparse
 from tqdm import tqdm
 
 from data_utils.ParamDataLoader import MCBDataLoader
-from models.cstnet_cls import CstNet
-from models.cst_pred import CstPnt
+from models.cstnet import CstNet
+from models.cstpnt import CstPnt
 from models.utils import all_metric_cls
 
 

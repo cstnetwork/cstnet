@@ -2,26 +2,15 @@
 train constraint prediction
 '''
 import os
-import sys
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = BASE_DIR
-
-sys.path.append(os.path.join(ROOT_DIR, 'models'))
-sys.path.append(os.path.join(ROOT_DIR, 'data_utils'))
-
 import torch
 import torch.nn.functional as F
 from datetime import datetime
 import logging
 import argparse
-import numpy as np
 
-# from models.TriFeaPred import TriFeaPred
-from data_utils.ParamDataLoader import ParamDataLoader
 from data_utils.ParamDataLoader import STEPMillionDataLoader
+from models.cstpnt import CstPnt
 
-from models.cst_pred import CstPnt
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -33,21 +22,13 @@ def parse_args():
     parser.add_argument('--epoch', default=200, type=int, help='number of epoch in training')
     parser.add_argument('--learning_rate', default=0.001, type=float, help='learning rate in training')
     parser.add_argument('--num_point', type=int, default=2500, help='Point Number')
-    parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer for training')
     parser.add_argument('--decay_rate', type=float, default=1e-4, help='decay rate')
     parser.add_argument('--n_primitive', type=int, default=4, help='number of considered meta type')
     parser.add_argument('--workers', type=int, default=10, help='dataloader workers')
     parser.add_argument('--root_dataset', type=str, default=r'D:\document\DeepLearning\DataSet\STEPMillion\STEPMillion_pack1', help='root of dataset')
 
     args = parser.parse_args()
-    print(args)
     return args
-
-
-def inplace_relu(m):
-    classname = m.__class__.__name__
-    if classname.find('ReLU') != -1:
-        m.inplace = True
 
 
 def main(args):
@@ -77,21 +58,16 @@ def main(args):
     except:
         print('no existing model, training from scratch')
 
-    predictor.apply(inplace_relu)
     if not args.use_cpu:
         predictor = predictor.cuda()
 
-    # args.optimizer='Adam'
-    if args.optimizer == 'Adam':
-        optimizer = torch.optim.Adam(
-            predictor.parameters(),
-            lr=args.learning_rate, # 0.001
-            betas=(0.9, 0.999),
-            eps=1e-08,
-            weight_decay=args.decay_rate # 1e-4
-        )
-    else:
-        optimizer = torch.optim.SGD(predictor.parameters(), lr=0.01, momentum=0.9)
+    optimizer = torch.optim.Adam(
+        predictor.parameters(),
+        lr=args.learning_rate, # 0.001
+        betas=(0.9, 0.999),
+        eps=1e-08,
+        weight_decay=args.decay_rate # 1e-4
+    )
 
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
     num_batch = len(train_dataloader)
@@ -148,8 +124,5 @@ def main(args):
 
 
 if __name__ == '__main__':
-    # asas = np.loadtxt(r'D:\document\DeepLearning\DataSet\STEPMillion\STEPMillion_pack1\overall\2629.txt')
-    # print(asas)
+    main(parse_args())
 
-    parsed_args = parse_args()
-    main(parsed_args)

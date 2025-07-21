@@ -1,37 +1,9 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import matplotlib.pyplot as plt
-from sortedcontainers import SortedDict
 import torch.nn.functional as F
-import time
-from scipy.interpolate import griddata
-import math
 from sklearn.metrics import f1_score, average_precision_score
 from sklearn.preprocessing import label_binarize
-
-import pymeshlab
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-
-
-def plot_rectangular_prism(ax, origin, size):
-    x = [origin[0], origin[0] + size[0]]
-    y = [origin[1], origin[1] + size[1]]
-    z = [origin[2], origin[2] + size[2]]
-
-    vertices = [[x[0], y[0], z[0]], [x[1], y[0], z[0]], [x[1], y[1], z[0]], [x[0], y[1], z[0]],
-                [x[0], y[0], z[1]], [x[1], y[0], z[1]], [x[1], y[1], z[1]], [x[0], y[1], z[1]]]
-
-    faces = [[vertices[j] for j in [0, 1, 5, 4]],
-             [vertices[j] for j in [7, 6, 2, 3]],
-             [vertices[j] for j in [0, 3, 7, 4]],
-             [vertices[j] for j in [1, 2, 6, 5]],
-             [vertices[j] for j in [0, 1, 2, 3]],
-             [vertices[j] for j in [4, 5, 6, 7]]]
-
-    poly3d = Poly3DCollection(faces, alpha=0.1, edgecolor='k', facecolors=[1,1,1])
-
-    ax.add_collection3d(poly3d)
 
 
 class full_connected_conv3d(nn.Module):
@@ -171,7 +143,7 @@ def index_points(points, idx, is_label: bool = False):
     return new_points
 
 
-def get_neighbor_index(vertices: "(bs, vertice_num, 3)",  neighbor_num: int, is_backdis: bool = False):
+def knn(vertices: "(bs, vertice_num, 3)",  neighbor_num: int, is_backdis: bool = False):
     bs, v, _ = vertices.size()
     inner = torch.bmm(vertices, vertices.transpose(1, 2)) #(bs, v, v)
     quadratic = torch.sum(vertices**2, dim= 2) #(bs, v)
@@ -205,7 +177,7 @@ def indexes_val(vals, inds):
 
 
 def surface_knn(points_all: "(bs, n_pnts, 3)", k_near: int = 100, n_stepk = 10):
-    ind_neighbor_all, all_dist = get_neighbor_index(points_all, n_stepk, True)
+    ind_neighbor_all, all_dist = knn(points_all, n_stepk, True)
 
     neighbor_index_max = torch.max(all_dist, dim=-1, keepdim=True)[1]
 
@@ -310,5 +282,4 @@ def all_metric_cls(all_preds: list, all_labels: list):
 
 
 if __name__ == '__main__':
-
     pass

@@ -2,18 +2,7 @@
 vis constraint prediction
 '''
 import os
-import sys
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = BASE_DIR
-
-sys.path.append(os.path.join(ROOT_DIR, 'models'))
-sys.path.append(os.path.join(ROOT_DIR, 'data_utils'))
-
 import torch
-import torch.nn.functional as F
-from datetime import datetime
-import logging
 import argparse
 import numpy as np
 import open3d as o3d
@@ -24,11 +13,7 @@ from tqdm import tqdm
 import shutil
 from pathlib import Path
 
-# from models.TriFeaPred import TriFeaPred
-from data_utils.ParamDataLoader import ParamDataLoader
-from data_utils.ParamDataLoader import STEPMillionDataLoader
-from models.cst_pred import CstPnt
-from data_utils.ModelNetDataLoader import ModelNetDataLoader
+from models.cstpnt import CstPnt
 
 
 def is_suffix_step(filename):
