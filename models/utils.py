@@ -1,132 +1,103 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from sklearn.metrics import f1_score, average_precision_score
 from sklearn.preprocessing import label_binarize
+from functools import partial
 
 
-class full_connected_conv3d(nn.Module):
-    def __init__(self, channels: list, bias: bool = True, drop_rate: float = 0.4):
+class MLP(nn.Module):
+    def __init__(self, dimension: int, channels: tuple, bias: bool = True, dropout: float = 0.4, final_proc=False):
+        """
+        :param dimension: 输入维度数，[0, 1, 2, 3]
+            输入数据维度: [bs, c], dimension = 0
+            输入数据维度: [bs, c, d], dimension = 1
+            输入数据维度: [bs, c, d, e], dimension = 2
+            输入数据维度: [bs, c, d, e, f], dimension = 3
+        :param channels: 输入层到输出层的维度，[in, hid1, hid2, ..., out]
+        :param bias:
+        :param dropout: dropout 概率
+        :param final_proc:
+        """
         super().__init__()
 
         self.linear_layers = nn.ModuleList()
         self.batch_normals = nn.ModuleList()
+        self.activates = nn.ModuleList()
         self.drop_outs = nn.ModuleList()
+
         self.n_layers = len(channels)
+        self.final_proc = final_proc
+        if dropout == 0:
+            self.is_drop = False
+        else:
+            self.is_drop = True
+
+        if dimension == 0:
+            fc = nn.Linear
+            bn = nn.BatchNorm1d
+            dp = nn.Dropout
+
+        elif dimension == 1:
+            fc = partial(nn.Conv1d, kernel_size=1)
+            bn = nn.BatchNorm1d
+            dp = nn.Dropout1d
+
+        elif dimension == 2:
+            fc = partial(nn.Conv2d, kernel_size=1)
+            bn = nn.BatchNorm2d
+            dp = nn.Dropout2d
+
+        elif dimension == 3:
+            fc = partial(nn.Conv3d, kernel_size=1)
+            bn = nn.BatchNorm3d
+            dp = nn.Dropout3d
+
+        else:
+            raise ValueError('error dimension value, [0, 1, 2, 3] is supported')
 
         for i in range(self.n_layers - 2):
-            self.linear_layers.append(nn.Conv3d(channels[i], channels[i + 1], 1, bias=bias))
-            self.batch_normals.append(nn.BatchNorm3d(channels[i + 1]))
-            self.drop_outs.append(nn.Dropout3d(drop_rate))
+            self.linear_layers.append(fc(channels[i], channels[i + 1], bias=bias))
+            self.batch_normals.append(bn(channels[i + 1]))
+            self.activates.append(nn.LeakyReLU(negative_slope=0.2))
+            self.drop_outs.append(dp(dropout))
 
-        self.outlayer = nn.Conv3d(channels[-2], channels[-1], 1, bias=bias)
+        self.outlayer = fc(channels[-2], channels[-1], bias=bias)
 
-    def forward(self, embeddings):
-        fea = embeddings
+        self.outbn = bn(channels[-1])
+        self.outat = nn.LeakyReLU(negative_slope=0.2)
+        self.outdp = dp(dropout)
+
+    def forward(self, fea):
+        """
+        :param fea:
+        :return:
+        """
+
         for i in range(self.n_layers - 2):
             fc = self.linear_layers[i]
             bn = self.batch_normals[i]
-            drop = self.drop_outs[i]
+            at = self.activates[i]
+            dp = self.drop_outs[i]
 
-            fea = drop(F.relu(bn(fc(fea))))
+            if self.is_drop:
+                fea = dp(at(bn(fc(fea))))
+            else:
+                fea = at(bn(fc(fea)))
 
         fea = self.outlayer(fea)
+
+        if self.final_proc:
+            fea = self.outbn(fea)
+            fea = self.outat(fea)
+
+            if self.is_drop:
+                fea = self.outdp(fea)
 
         return fea
 
 
-class full_connected_conv2d(nn.Module):
-    def __init__(self, channels: list, bias: bool = True, drop_rate: float = 0.4):
-        super().__init__()
-
-        self.linear_layers = nn.ModuleList()
-        self.batch_normals = nn.ModuleList()
-        self.drop_outs = nn.ModuleList()
-        self.n_layers = len(channels)
-
-        for i in range(self.n_layers - 2):
-            self.linear_layers.append(nn.Conv2d(channels[i], channels[i + 1], 1, bias=bias))
-            self.batch_normals.append(nn.BatchNorm2d(channels[i + 1]))
-            self.drop_outs.append(nn.Dropout2d(drop_rate))
-
-        self.outlayer = nn.Conv2d(channels[-2], channels[-1], 1, bias=bias)
-
-    def forward(self, embeddings):
-        fea = embeddings
-        for i in range(self.n_layers - 2):
-            fc = self.linear_layers[i]
-            bn = self.batch_normals[i]
-            drop = self.drop_outs[i]
-
-            fea = drop(F.relu(bn(fc(fea))))
-
-        fea = self.outlayer(fea)
-
-        return fea
-
-
-class full_connected_conv1d(nn.Module):
-    def __init__(self, channels: list, bias: bool = True, drop_rate: float = 0.4):
-        super().__init__()
-
-        self.linear_layers = nn.ModuleList()
-        self.batch_normals = nn.ModuleList()
-        self.drop_outs = nn.ModuleList()
-        self.n_layers = len(channels)
-
-        for i in range(self.n_layers - 2):
-            self.linear_layers.append(nn.Conv1d(channels[i], channels[i + 1], 1, bias=bias))
-            self.batch_normals.append(nn.BatchNorm1d(channels[i + 1]))
-            self.drop_outs.append(nn.Dropout1d(drop_rate))
-
-        self.outlayer = nn.Conv1d(channels[-2], channels[-1], 1, bias=bias)
-
-    def forward(self, embeddings):
-        fea = embeddings
-        for i in range(self.n_layers - 2):
-            fc = self.linear_layers[i]
-            bn = self.batch_normals[i]
-            drop = self.drop_outs[i]
-
-            fea = drop(F.relu(bn(fc(fea))))
-
-        fea = self.outlayer(fea)
-
-        return fea
-
-
-class full_connected(nn.Module):
-    def __init__(self, channels: list, bias: bool = True, drop_rate: float = 0.4):
-        super().__init__()
-
-        self.linear_layers = nn.ModuleList()
-        self.batch_normals = nn.ModuleList()
-        self.drop_outs = nn.ModuleList()
-        self.n_layers = len(channels)
-
-        for i in range(self.n_layers - 2):
-            self.linear_layers.append(nn.Linear(channels[i], channels[i + 1], bias=bias))
-            self.batch_normals.append(nn.BatchNorm1d(channels[i + 1]))
-            self.drop_outs.append(nn.Dropout(drop_rate))
-
-        self.outlayer = nn.Linear(channels[-2], channels[-1], bias=bias)
-
-    def forward(self, embeddings):
-        fea = embeddings
-        for i in range(self.n_layers - 2):
-            fc = self.linear_layers[i]
-            bn = self.batch_normals[i]
-            drop = self.drop_outs[i]
-
-            fea = drop(F.relu(bn(fc(fea))))
-
-        fea = self.outlayer(fea)
-
-        return fea
-
-
-def index_points(points, idx, is_label: bool = False):
+def index_points(points, idx):
     device = points.device
     B = points.shape[0]
     view_shape = list(idx.shape)
@@ -134,13 +105,42 @@ def index_points(points, idx, is_label: bool = False):
     repeat_shape = list(idx.shape)
     repeat_shape[0] = 1
     batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
-
-    if is_label:
-        new_points = points[batch_indices, idx]
-    else:
-        new_points = points[batch_indices, idx, :]
-
+    new_points = points[batch_indices, idx, :]
     return new_points
+
+
+def indexes_val(vals, inds):
+    bs, n_item, n_vals = inds.size()
+    sequence = torch.arange(bs)
+    sequence_expanded = sequence.unsqueeze(1)
+    sequence_3d = sequence_expanded.tile((1, n_item))
+    sequence_4d = sequence_3d.unsqueeze(-1)
+    batch_indices = sequence_4d.repeat(1, 1, n_vals)
+    view_shape = [n_item, n_vals]
+    view_shape[1:] = [1] * (len(view_shape) - 1)
+    repeat_shape = [bs, n_item, n_vals]
+    repeat_shape[1] = 1
+    channel_indices = torch.arange(n_item, dtype=torch.long).view(view_shape).repeat(repeat_shape)
+    return vals[batch_indices, channel_indices, inds]
+
+
+def fps(xyz, n_samples):
+    device = xyz.device
+    B, N, C = xyz.shape
+
+    centroids = torch.zeros(B, n_samples, dtype=torch.long).to(device)
+    distance = torch.ones(B, N).to(device) * 1e10
+    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
+    batch_indices = torch.arange(B, dtype=torch.long).to(device)
+
+    for i in range(n_samples):
+        centroids[:, i] = farthest
+        centroid = xyz[batch_indices, farthest, :].view(B, 1, 3)
+        dist = torch.sum((xyz - centroid) ** 2, -1)
+        mask = dist < distance
+        distance[mask] = dist[mask].float()
+        farthest = torch.max(distance, -1)[1]
+    return centroids
 
 
 def knn(vertices: "(bs, vertice_num, 3)",  neighbor_num: int, is_backdis: bool = False):
@@ -158,22 +158,7 @@ def knn(vertices: "(bs, vertice_num, 3)",  neighbor_num: int, is_backdis: bool =
         return neighbor_index
 
 
-def indexes_val(vals, inds):
-    bs, n_item, n_vals = inds.size()
 
-    sequence = torch.arange(bs)
-    sequence_expanded = sequence.unsqueeze(1)
-    sequence_3d = sequence_expanded.tile((1, n_item))
-    sequence_4d = sequence_3d.unsqueeze(-1)
-    batch_indices = sequence_4d.repeat(1, 1, n_vals)
-
-    view_shape = [n_item, n_vals]
-    view_shape[1:] = [1] * (len(view_shape) - 1)
-    repeat_shape = [bs, n_item, n_vals]
-    repeat_shape[1] = 1
-    channel_indices = torch.arange(n_item, dtype=torch.long).view(view_shape).repeat(repeat_shape)
-
-    return vals[batch_indices, channel_indices, inds]
 
 
 def surface_knn(points_all: "(bs, n_pnts, 3)", k_near: int = 100, n_stepk = 10):

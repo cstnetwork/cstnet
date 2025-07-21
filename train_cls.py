@@ -5,7 +5,6 @@ train classification
 
 import os
 import torch
-import numpy as np
 import torch.nn.functional as F
 from datetime import datetime
 import logging
@@ -13,7 +12,7 @@ import argparse
 from tqdm import tqdm
 
 from data_utils.ParamDataLoader import MCBDataLoader
-from models.cstnet import CstNet
+from models.cstnet_s2 import CstNetS2
 from models.cstpnt import CstPnt
 from models.utils import all_metric_cls
 
@@ -33,26 +32,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def inplace_relu(m):
-    classname = m.__class__.__name__
-    if classname.find('ReLU') != -1:
-        m.inplace = True
-
-
-def accuracy_over_class(all_labels, all_preds, n_classes):
-    accuracies = []
-
-    for class_idx in range(n_classes):
-        class_mask = (all_labels == class_idx)
-        if class_mask.sum().item() == 0:
-            continue
-        class_accuracy = (all_preds[class_mask] == all_labels[class_mask]).float().mean().item()
-        accuracies.append(class_accuracy)
-
-    return np.mean(accuracies)
-
-
 def main(args):
+    # parameters
     save_str = 'ca_final_predattr'
     is_use_pred_addattr = True
 
@@ -60,7 +41,7 @@ def main(args):
     confusion_dir = os.path.join('data_utils', 'confusion', confusion_dir)
     os.makedirs(confusion_dir, exist_ok=True)
 
-    # 日志记录
+    # logger
     logger = logging.getLogger("Model")
     logger.setLevel(logging.INFO)
     file_handler = logging.FileHandler('log/' + save_str + f'-{datetime.now().strftime("%Y-%m-%d %H-%M-%S")}.txt')
@@ -69,8 +50,7 @@ def main(args):
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    '''HYPER PARAMETER'''
-    # 定义数据集，训练集及对应加载器
+    # datasets
     train_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.n_point, is_train=True, data_augmentation=False)
     test_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.n_point, is_train=False, data_augmentation=False)
     num_class = len(train_dataset.classes)
@@ -78,8 +58,8 @@ def main(args):
     trainDataLoader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     testDataLoader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
-    '''MODEL LOADING'''
-    classifier = CstNet(num_class, args.n_primitive)
+    # loading model
+    classifier = CstNetS2(num_class, args.n_primitive)
 
     model_savepth = 'model_trained/' + save_str + '.pth'
     try:
@@ -91,16 +71,16 @@ def main(args):
     if is_use_pred_addattr:
         try:
             predictor = CstPnt(n_points_all=args.n_point, n_primitive=args.n_primitive).cuda()
-            predictor.load_state_dict(torch.load('model_trained/TriFeaPred_ValidOrig_fuse.pth'))
+            predictor.load_state_dict(torch.load('model_trained/cstpnt_abc25t.pth'))
             predictor = predictor.eval()
-            print('load param attr predictor from', 'model_trained/TriFeaPred_ValidOrig_fuse.pth')
+            print('load param attr predictor from', 'model_trained/cstpnt_abc25t.pth')
         except:
             print('load param attr predictor failed')
             exit(1)
 
-    classifier.apply(inplace_relu)
     classifier = classifier.cuda()
 
+    # optimizer
     optimizer = torch.optim.Adam(
         classifier.parameters(),
         lr=args.lr,
@@ -111,7 +91,7 @@ def main(args):
 
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
 
-    '''TRANING'''
+    # training
     for epoch in range(args.epoch):
         logstr_epoch = 'Epoch %d/%d:' % (epoch + 1, args.epoch)
         all_preds = []

@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
-from utils import full_connected_conv1d
+from models import utils
 
 
 def index_points(points, idx):
@@ -217,11 +217,11 @@ class CstPnt(nn.Module):
         self.drop1 = nn.Dropout(0.5)
         self.conv2 = nn.Conv1d(128, n_embout, 1)
 
-        self.eula_angle = full_connected_conv1d([n_embout, 256, 128, 32, 3])
+        self.eula_angle = utils.MLP(1, (n_embout, 256, 128, 32, 3))
 
-        self.edge_nearby = full_connected_conv1d([n_embout, 256, 128, 32, 2])
+        self.edge_nearby = utils.MLP(1, (n_embout, 256, 128, 32, 2))
 
-        self.meta_type = full_connected_conv1d([n_embout, 256, 128, 64, n_primitive])
+        self.meta_type = utils.MLP(1, (n_embout, 256, 128, 64, n_primitive))
 
     def forward(self, xyz):
         xyz = xyz.transpose(1, -1)
