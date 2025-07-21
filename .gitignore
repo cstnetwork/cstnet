@@ -1,4 +1,4 @@
 models/__pycache__/
+data_utils/__pycache__/
 .idea/
 weights/
-data_utils/meta/
