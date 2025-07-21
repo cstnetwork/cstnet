@@ -3,8 +3,3 @@ data_utils/__pycache__/
 .idea/
 weights/
 
-data_utils/collect_indoor3d_data.py
-data_utils/indoor3d_util.py
-data_utils/ModelNetDataLoader.py
-data_utils/S3DISDataLoader.py
-data_utils/ShapeNetDataLoader.py
