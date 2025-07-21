@@ -3,7 +3,6 @@
 train classification
 """
 
-import os
 import torch
 import torch.nn.functional as F
 from datetime import datetime
@@ -18,7 +17,7 @@ from models.utils import all_metric_cls
 
 
 def parse_args():
-    '''PARAMETERS'''
+
     parser = argparse.ArgumentParser('training')
     parser.add_argument('--batch_size', type=int, default=16, help='batch size in training')
     parser.add_argument('--epoch', default=200, type=int, help='number of epoch in training')
@@ -37,10 +36,6 @@ def main(args):
     save_str = 'ca_final_predattr'
     is_use_pred_addattr = True
 
-    confusion_dir = save_str + '-' + datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-    confusion_dir = os.path.join('data_utils', 'confusion', confusion_dir)
-    os.makedirs(confusion_dir, exist_ok=True)
-
     # logger
     logger = logging.getLogger("Model")
     logger.setLevel(logging.INFO)
@@ -55,8 +50,8 @@ def main(args):
     test_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.n_point, is_train=False, data_augmentation=False)
     num_class = len(train_dataset.classes)
 
-    trainDataLoader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
-    testDataLoader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
     # loading model
     classifier = CstNetS2(num_class, args.n_primitive)
@@ -98,7 +93,7 @@ def main(args):
         all_labels = []
 
         classifier = classifier.train()
-        for batch_id, data in tqdm(enumerate(trainDataLoader, 0), total=len(trainDataLoader)):
+        for batch_id, data in tqdm(enumerate(train_loader), total=len(train_loader)):
             points = data[0].cuda()
             target = data[1].long().cuda()
 
@@ -138,7 +133,7 @@ def main(args):
             all_labels = []
 
             classifier = classifier.eval()
-            for j, data in tqdm(enumerate(testDataLoader), total=len(testDataLoader)):
+            for j, data in tqdm(enumerate(test_loader), total=len(test_loader)):
                 points = data[0].cuda()
                 target = data[1].long().cuda()
 

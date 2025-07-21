@@ -4,77 +4,6 @@ import torch.nn.functional as F
 from models import utils
 
 
-class PointAttention(nn.Module):
-    def __init__(self, channel_c, channel_n, channel_out):
-        super().__init__()
-
-        self.fai = utils.MLP(2, (channel_c, channel_c - 1, channel_out))
-        self.psi = utils.MLP(2, (channel_n, channel_n - 1, channel_out))
-        self.alpha = utils.MLP(2, (channel_n, channel_n - 1, channel_out))
-        self.gamma = utils.MLP(2, (channel_out, channel_out - 1, channel_out))
-
-    def forward(self, x_i, x_j):
-        """
-        x_i: [bs, n_point, channel], center
-        x_j: [bs, n_point, n_near, channel], neighbor
-
-        """
-        x_i = x_i.unsqueeze(2).permute(0, 3, 2, 1)
-        x_j = x_j.permute(0, 3, 2, 1)
-
-        bs, channel, n_near, n_point = x_j.size()
-
-        fai_xi = self.fai(x_i)  # -> [bs, channel, 1, npoint]
-        psi_xj = self.psi(x_j)  # -> [bs, channel, n_near, npoint]
-        alpha_xj = self.alpha(x_j)  # -> [bs, channel, n_near, npoint]
-
-        y_i = (channel * F.softmax(self.gamma(fai_xi - psi_xj), dim=1)) * alpha_xj  # -> [bs, channel, n_near, npoint]
-        y_i = torch.sum(y_i, dim=2)  # -> [bs, channel, npoint]
-        y_i = y_i / n_near  # -> [bs, channel, npoint]
-        y_i = y_i.permute(0, 2, 1)  # -> [bs, npoint, channel]
-
-        return y_i
-
-
-class FeaAttention(nn.Module):
-    def __init__(self, channel_in, channel_out):
-        super().__init__()
-
-        channel_mid = int((channel_in * channel_out) ** 0.5)
-        self.fai = utils.MLP(2, (channel_in, channel_mid, channel_out))
-        self.psi = utils.MLP(2, (channel_in, channel_mid, channel_out))
-        self.alpha = utils.MLP(2, (channel_in, channel_mid, channel_out))
-        self.gamma = utils.MLP(2, (channel_out, channel_out, channel_out))
-
-    def forward(self, mad_fea, adj_fea, pt_fea, cst_fea):
-        """
-        :param mad_fea: [bs, n_points, f]
-        :param adj_fea: [bs, n_points, f]
-        :param pt_fea: [bs, n_points, f]
-        :param cst_fea: [bs, n_points, f]
-        :return:
-        """
-
-        # x_i: [bs, channel, 1, n_point]
-        x_i = cst_fea.unsqueeze(2).permute(0, 3, 2, 1)
-
-        # x_j: [bs, channel, 3, n_point]
-        x_j = torch.cat([mad_fea.unsqueeze(2), adj_fea.unsqueeze(2), pt_fea.unsqueeze(2)], dim=2).permute(0, 3, 2, 1)
-
-        bs, channel, n_near, n_point = x_j.size()
-
-        fai_xi = self.fai(x_i)  # -> [bs, channel, 1, npoint]
-        psi_xj = self.psi(x_j)  # -> [bs, channel, n_near, npoint]
-        alpha_xj = self.alpha(x_j)  # -> [bs, channel, n_near, npoint]
-
-        y_i = (channel * F.softmax(self.gamma(fai_xi - psi_xj), dim=1)) * alpha_xj  # -> [bs, channel, n_near, npoint]
-        y_i = torch.sum(y_i, dim=2)  # -> [bs, channel, npoint]
-        y_i = y_i / n_near  # -> [bs, channel, npoint]
-        y_i = y_i.permute(0, 2, 1)  # -> [bs, npoint, channel]
-
-        return y_i
-
-
 class QuarticSSA(nn.Module):
     def __init__(self, n_center, n_near, n_stepk, n_primitive, channel_in, channel_out):
         """
@@ -89,10 +18,10 @@ class QuarticSSA(nn.Module):
         self.n_near = n_near
         self.n_stepk = n_stepk
 
-        self.attention_points_mad = PointAttention(channel_in, channel_in + 3, channel_out)
-        self.attention_points_adj = PointAttention(channel_in, channel_in + 4, channel_out)
-        self.attention_points_pt = PointAttention(channel_in, channel_in + n_primitive * 2, channel_out)
-        self.attention_points_cst = PointAttention(channel_in, channel_in + 3, channel_out)
+        self.attention_points_mad = utils.PointAttention(channel_in, channel_in + 3, channel_out)
+        self.attention_points_adj = utils.PointAttention(channel_in, channel_in + 4, channel_out)
+        self.attention_points_pt = utils.PointAttention(channel_in, channel_in + n_primitive * 2, channel_out)
+        self.attention_points_cst = utils.PointAttention(channel_in, channel_in + 3, channel_out)
 
         self.mlp_mad = utils.MLP(0, (channel_in + 3, channel_out, channel_out))
         self.mlp_adj = utils.MLP(0, (channel_in + 4, channel_out, channel_out))
@@ -250,19 +179,19 @@ class CstNetS2(nn.Module):
         self.c_mlp = CMLP(n_primitive, (16, channel_l0))
 
         self.quartic_ssa1 = QuarticSSA(1024, 32, 5, n_primitive, channel_l0, channel_l1)
-        self.fea_attn1 = FeaAttention(channel_l1, channel_l1)
+        self.fea_attn1 = utils.FeaAttention(channel_l1, channel_l1)
 
         self.quartic_ssa2 = QuarticSSA(512, 32, 5, n_primitive, channel_l1, channel_l2)
-        self.fea_attn2 = FeaAttention(channel_l2, channel_l2)
+        self.fea_attn2 = utils.FeaAttention(channel_l2, channel_l2)
 
         self.quartic_ssa3 = QuarticSSA(128, 64, 10, n_primitive, channel_l2, channel_l3)
-        self.fea_attn3 = FeaAttention(channel_l3, channel_l3)
+        self.fea_attn3 = utils.FeaAttention(channel_l3, channel_l3)
 
         self.quartic_ssa4 = QuarticSSA(64, 64, 10, n_primitive, channel_l3, channel_l4)
-        self.fea_attn4 = FeaAttention(channel_l4, channel_l4)
+        self.fea_attn4 = utils.FeaAttention(channel_l4, channel_l4)
 
         self.quartic_ssa5 = QuarticSSA(None, None, None, n_primitive, channel_l4, channel_l5)
-        self.fea_attn5 = FeaAttention(channel_l5, channel_l5)
+        self.fea_attn5 = utils.FeaAttention(channel_l5, channel_l5)
 
         self.linear = utils.MLP(0, (channel_l5, channel_l4, channel_l3, channel_l2, n_classes))
 

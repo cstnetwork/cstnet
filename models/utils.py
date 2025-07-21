@@ -4,6 +4,7 @@ import torch.nn as nn
 from sklearn.metrics import f1_score, average_precision_score
 from sklearn.preprocessing import label_binarize
 from functools import partial
+import torch.nn.functional as F
 
 
 class MLP(nn.Module):
@@ -95,6 +96,78 @@ class MLP(nn.Module):
                 fea = self.outdp(fea)
 
         return fea
+
+
+class PointAttention(nn.Module):
+    def __init__(self, channel_c, channel_n, channel_out):
+        super().__init__()
+
+        channel_mid = int((channel_c * channel_out) ** 0.5)
+        self.fai = MLP(2, (channel_c, channel_mid, channel_out))
+        self.psi = MLP(2, (channel_n, channel_mid, channel_out))
+        self.alpha = MLP(2, (channel_n, channel_mid, channel_out))
+        self.gamma = MLP(2, (channel_out, channel_out - 1, channel_out))
+
+    def forward(self, x_i, x_j):
+        """
+        x_i: [bs, n_point, channel], center
+        x_j: [bs, n_point, n_near, channel], neighbor
+
+        """
+        x_i = x_i.unsqueeze(2).permute(0, 3, 2, 1)
+        x_j = x_j.permute(0, 3, 2, 1)
+
+        bs, channel, n_near, n_point = x_j.size()
+
+        fai_xi = self.fai(x_i)  # -> [bs, channel, 1, npoint]
+        psi_xj = self.psi(x_j)  # -> [bs, channel, n_near, npoint]
+        alpha_xj = self.alpha(x_j)  # -> [bs, channel, n_near, npoint]
+
+        y_i = (channel * F.softmax(self.gamma(fai_xi - psi_xj), dim=1)) * alpha_xj  # -> [bs, channel, n_near, npoint]
+        y_i = torch.sum(y_i, dim=2)  # -> [bs, channel, npoint]
+        y_i = y_i / n_near  # -> [bs, channel, npoint]
+        y_i = y_i.permute(0, 2, 1)  # -> [bs, npoint, channel]
+
+        return y_i
+
+
+class FeaAttention(nn.Module):
+    def __init__(self, channel_in, channel_out):
+        super().__init__()
+
+        channel_mid = int((channel_in * channel_out) ** 0.5)
+        self.fai = MLP(2, (channel_in, channel_mid, channel_out))
+        self.psi = MLP(2, (channel_in, channel_mid, channel_out))
+        self.alpha = MLP(2, (channel_in, channel_mid, channel_out))
+        self.gamma = MLP(2, (channel_out, channel_out, channel_out))
+
+    def forward(self, mad_fea, adj_fea, pt_fea, cst_fea):
+        """
+        :param mad_fea: [bs, n_points, f]
+        :param adj_fea: [bs, n_points, f]
+        :param pt_fea: [bs, n_points, f]
+        :param cst_fea: [bs, n_points, f]
+        :return:
+        """
+
+        # x_i: [bs, channel, 1, n_point]
+        x_i = cst_fea.unsqueeze(2).permute(0, 3, 2, 1)
+
+        # x_j: [bs, channel, 3, n_point]
+        x_j = torch.cat([mad_fea.unsqueeze(2), adj_fea.unsqueeze(2), pt_fea.unsqueeze(2)], dim=2).permute(0, 3, 2, 1)
+
+        bs, channel, n_near, n_point = x_j.size()
+
+        fai_xi = self.fai(x_i)  # -> [bs, channel, 1, npoint]
+        psi_xj = self.psi(x_j)  # -> [bs, channel, n_near, npoint]
+        alpha_xj = self.alpha(x_j)  # -> [bs, channel, n_near, npoint]
+
+        y_i = (channel * F.softmax(self.gamma(fai_xi - psi_xj), dim=1)) * alpha_xj  # -> [bs, channel, n_near, npoint]
+        y_i = torch.sum(y_i, dim=2)  # -> [bs, channel, npoint]
+        y_i = y_i / n_near  # -> [bs, channel, npoint]
+        y_i = y_i.permute(0, 2, 1)  # -> [bs, npoint, channel]
+
+        return y_i
 
 
 def index_points(points, idx):
@@ -264,6 +337,15 @@ def all_metric_cls(all_preds: list, all_labels: list):
     mAP = np.mean(ap_sig)
 
     return acc_ins, acc_cls, f1_m, f1_w, mAP
+
+
+def square_distance(src, dst):
+    B, N, _ = src.shape
+    _, M, _ = dst.shape
+    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
+    dist += torch.sum(src ** 2, -1).view(B, N, 1)
+    dist += torch.sum(dst ** 2, -1).view(B, 1, M)
+    return dist
 
 
 if __name__ == '__main__':

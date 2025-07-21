@@ -8,8 +8,6 @@ import numpy as np
 import open3d as o3d
 import matplotlib as plt
 from torch.utils.data import Dataset
-from PIL import Image
-from tqdm import tqdm
 import shutil
 from pathlib import Path
 
@@ -76,7 +74,7 @@ class TestStepDataLoader(Dataset):
 
     def __getitem__(self, index):
         fn = self.datapath[index].strip()
-        point_set = np.loadtxt(fn)  # [x, y, z, ex, ey, ez, near, meta]
+        point_set = np.loadtxt(fn)  # [x, y, z, ex, ey, ez, adj, pt]
 
         try:
             choice = np.random.choice(point_set.shape[0], self.npoints, replace=True)
@@ -86,7 +84,7 @@ class TestStepDataLoader(Dataset):
         point_set = point_set[choice, :]
 
         if self.is_addattr:
-            euler_angle = point_set[:, 3:6]
+            mad = point_set[:, 3:6]
             edge_nearby = point_set[:, 6]
             primitive_type = point_set[:, 7]
 
@@ -97,7 +95,7 @@ class TestStepDataLoader(Dataset):
         point_set = point_set / dist  # scale
 
         if self.is_addattr:
-            return point_set, euler_angle, edge_nearby, primitive_type, fn
+            return point_set, mad, edge_nearby, primitive_type, fn
         else:
             return point_set, fn
 
@@ -105,8 +103,8 @@ class TestStepDataLoader(Dataset):
         return len(self.datapath)
 
 
-def vis_pointcloud(points, euler_angle, edge_nearby, meta_type, attr=None, show_normal=False, azimuth=45-90, elevation=45+90):
-    data_all = torch.cat([points, euler_angle, edge_nearby, meta_type], dim=-1).cpu().numpy()
+def vis_pointcloud(points, mad, edge_nearby, meta_type, attr=None, show_normal=False, azimuth=45-90, elevation=45+90):
+    data_all = torch.cat([points, mad, edge_nearby, meta_type], dim=-1).cpu().numpy()
 
     def spherical_to_cartesian():
         azimuth_rad = np.radians(azimuth)
@@ -162,7 +160,7 @@ def vis_pointcloud(points, euler_angle, edge_nearby, meta_type, attr=None, show_
                     # colors.append((230 / 255, 75 / 255, 52 / 255))
 
                 else:
-                    raise ValueError('not valid edge nearby')
+                    raise ValueError('not valid edge adj')
 
             colors = np.array(colors)
 
@@ -241,16 +239,13 @@ def parse_args():
     parser.add_argument('--decay_rate', type=float, default=1e-4, help='decay rate')
     parser.add_argument('--use_uniform_sample', action='store_true', default=False, help='use uniform sampiling')
     parser.add_argument('--use_normals', action='store_true', default=False, help='use normals')
-    parser.add_argument('--n_metatype', type=int, default=4, help='number of considered meta type')
+    parser.add_argument('--n_primitive', type=int, default=4, help='number of considered pt type')
     parser.add_argument('--workers', type=int, default=10, help='dataloader workers')
 
     parser.add_argument('--pcd_suffix', type=str, default='txt', help='-')
     parser.add_argument('--has_addattr', type=str, default='False', choices=['True', 'False'], help='-')
     parser.add_argument('--pred_model', type=str, default=r'TriFeaPred_ValidOrig_fuse', help='-')
     parser.add_argument('--root_dataset', type=str, default=r'D:\document\DeepLearning\paper_draw\AttrVis_MCB', help='root of dataset')
-    # STEPMillion: r'D:\document\DeepLearning\paper_draw\AttrVis_ABC'
-    # MCB: r'D:\document\DeepLearning\paper_draw\AttrVis_MCB'
-    # 360Gallery: r'D:\document\DeepLearning\DataSet\test\360Gallery'
 
     args = parser.parse_args()
     print(args)
@@ -276,7 +271,7 @@ def main(args):
     eval_dataloader = torch.utils.data.DataLoader(eval_dataset, batch_size=args.batch_size, shuffle=True, num_workers=int(args.workers))  # , drop_last=True
 
     '''MODEL LOADING'''
-    predictor = CstPnt(n_points_all=args.num_point, n_primitive=args.n_metatype).cuda()
+    predictor = CstPnt(n_points_all=args.num_point, n_primitive=args.n_primitive).cuda()
 
     model_savepth = 'model_trained/' + save_str + '.pth'
     try:
@@ -298,11 +293,11 @@ def main(args):
                 pcd_bs = data[-1]
 
                 if has_addattr:
-                    gt_euler = data[1].cuda()
-                    gt_edge = data[2].to(torch.long).cuda()
-                    gt_meta = data[3].to(torch.long).cuda()
-                    gt_edge = gt_edge.unsqueeze(2)
-                    gt_meta = gt_meta.unsqueeze(2)
+                    gt_mad = data[1].cuda()
+                    gt_adj = data[2].to(torch.long).cuda()
+                    gt_pt = data[3].to(torch.long).cuda()
+                    gt_adj = gt_adj.unsqueeze(2)
+                    gt_pt = gt_pt.unsqueeze(2)
 
             else:
                 xyz = data
@@ -311,22 +306,22 @@ def main(args):
 
             xyz = xyz.float().cuda()
 
-            pred_eula_angle, pred_edge_nearby, pred_meta_type = predictor(xyz)
+            pred_mad, pred_adj, pred_pt = predictor(xyz)
 
-            nearby = pred_edge_nearby.data.max(2)[1].unsqueeze(2)
-            meta = pred_meta_type.data.max(2)[1].unsqueeze(2)
+            pred_adj = pred_adj.data.max(2)[1].unsqueeze(2)
+            pred_pt = pred_pt.data.max(2)[1].unsqueeze(2)
 
             for c_bs in range(bs):
                 c_xyz = xyz[c_bs, :, :]
 
-                vis_pointcloud(c_xyz, pred_eula_angle[c_bs, :, :], nearby[c_bs, :, :], meta[c_bs, :, :], -2)
-                vis_pointcloud(c_xyz, pred_eula_angle[c_bs, :, :], nearby[c_bs, :, :], meta[c_bs, :, :], -1)
-                vis_pointcloud(c_xyz, pred_eula_angle[c_bs, :, :], nearby[c_bs, :, :], meta[c_bs, :, :], None, True)
+                vis_pointcloud(c_xyz, pred_mad[c_bs, :, :], pred_adj[c_bs, :, :], pred_pt[c_bs, :, :], -2)
+                vis_pointcloud(c_xyz, pred_mad[c_bs, :, :], pred_adj[c_bs, :, :], pred_pt[c_bs, :, :], -1)
+                vis_pointcloud(c_xyz, pred_mad[c_bs, :, :], pred_adj[c_bs, :, :], pred_pt[c_bs, :, :], None, True)
 
                 if has_addattr:
-                    vis_pointcloud(c_xyz, gt_euler[c_bs, :, :], gt_edge[c_bs, :, :], gt_meta[c_bs, :, :], -2)
-                    vis_pointcloud(c_xyz, gt_euler[c_bs, :, :], gt_edge[c_bs, :, :], gt_meta[c_bs, :, :], -1)
-                    vis_pointcloud(c_xyz, gt_euler[c_bs, :, :], gt_edge[c_bs, :, :], gt_meta[c_bs, :, :], None, True)
+                    vis_pointcloud(c_xyz, gt_mad[c_bs, :, :], gt_adj[c_bs, :, :], gt_pt[c_bs, :, :], -2)
+                    vis_pointcloud(c_xyz, gt_mad[c_bs, :, :], gt_adj[c_bs, :, :], gt_pt[c_bs, :, :], -1)
+                    vis_pointcloud(c_xyz, gt_mad[c_bs, :, :], gt_adj[c_bs, :, :], gt_pt[c_bs, :, :], None, True)
 
                     pcd_file = pcd_bs[c_bs]
                     stl_file = os.path.splitext(pcd_file)[0] + '.stl'
@@ -337,33 +332,6 @@ def main(args):
                     stl_file = os.path.splitext(pcd_file)[0] + '.obj'
                     stl_file = str(stl_file).replace('MCB_PointCloud', 'MCB')
                     vis_stl_view(stl_file)
-
-
-def remove_round_black(dir_path, pix_width=1):
-    pictures_all = get_allfiles(dir_path, 'png', False)
-
-    for c_pic in tqdm(pictures_all, total=len(pictures_all)):
-        img = Image.open(c_pic)
-        width, height = img.size
-        crop_area = (pix_width, pix_width, width - pix_width, height - pix_width)
-        cropped_img = img.crop(crop_area)
-        cropped_img.save(c_pic)
-        del_white_pixel(c_pic)
-
-
-def del_white_pixel(png_file):
-    image = Image.open(png_file).convert("RGBA")
-    data = image.getdata()
-    new_data = []
-
-    for item in data:
-        if item[:3] == (255, 255, 255):
-            new_data.append((255, 255, 255, 0))
-        else:
-            new_data.append(item)
-
-    image.putdata(new_data)
-    image.save(png_file, "PNG")
 
 
 def prepare_for_360Gallery_test(xyz_path, target_dir):
@@ -422,19 +390,5 @@ def prepare_for_MCB_test(xyz_path, target_dir, class_ins_count=5, start_idx=0):
 
 
 if __name__ == '__main__':
-
     main(parse_args())
-
-    # prepare_for_MCB_test(r'D:\document\DeepLearning\DataSet\MCB_PointCloud\MCB_A\train', r'D:\document\DeepLearning\paper_draw\AttrVis_MCB', 30)
-    # prepare_for_MCB_test(r'D:\document\DeepLearning\DataSet\MCB_PointCloud\MCB_B\train', r'D:\document\DeepLearning\paper_draw\AttrVis_MCB', 100)
-
-    # vis_stl_view(r'D:\document\DeepLearning\DataSet\STEP9000\STEP9000GenHammersleyXYZ-AddAttr\bearing\trans1\QJS200.stl')
-
-    # asas = np.loadtxt(r'D:\document\DeepLearning\DataSet\STEPMillion\STEPMillion_pack1\overall\2629.txt')
-    # print(asas)
-
-    # remove_round_black(r'C:\Users\ChengXi\Desktop\Pred3Attr-MCB')
-
-    # prepare_for_360Gallery_test(r'D:\document\DeepLearning\DataSet\360Gallery_Seg\point_clouds', r'D:\document\DeepLearning\DataSet\test\360Gallery')
-
 
