@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 import argparse
 
-from data_utils.Param20KDataset import STEPMillionDataLoader
+from data_utils.Param20KDataset import CstPntDataset
 from models.cstpnt import CstPnt
 
 
@@ -45,7 +45,7 @@ def main(args):
     '''HYPER PARAMETER'''
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
-    train_dataset = STEPMillionDataLoader(root=args.root_dataset, npoints=args.num_point, data_augmentation=True)
+    train_dataset = CstPntDataset(root=args.root_dataset, npoints=args.num_point, data_augmentation=True)
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=int(args.workers))  # , drop_last=True
 
     '''MODEL LOADING'''

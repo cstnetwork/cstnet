@@ -5,6 +5,8 @@ from sklearn.metrics import f1_score, average_precision_score
 from sklearn.preprocessing import label_binarize
 from functools import partial
 import torch.nn.functional as F
+import os
+from pathlib import Path
 
 
 class MLP(nn.Module):
@@ -346,6 +348,57 @@ def square_distance(src, dst):
     dist += torch.sum(src ** 2, -1).view(B, N, 1)
     dist += torch.sum(dst ** 2, -1).view(B, 1, M)
     return dist
+
+
+def is_suffix_step(filename):
+    if filename[-4:] == '.stp' \
+            or filename[-5:] == '.step' \
+            or filename[-5:] == '.STEP':
+        return True
+
+    else:
+        return False
+
+
+def get_allfiles(dir_path, suffix='txt', filename_only=False):
+    '''
+    获取dir_path下的全部文件路径
+    '''
+    filepath_all = []
+
+    def other_judge(file_name):
+        if file_name.split('.')[-1] == suffix:
+            return True
+        else:
+            return False
+
+    if suffix == 'stp' or suffix == 'step' or suffix == 'STEP':
+        suffix_judge = is_suffix_step
+    else:
+        suffix_judge = other_judge
+
+    for root, dirs, files in os.walk(dir_path):
+        for file in files:
+            if suffix_judge(file):
+                if filename_only:
+                    current_filepath = file
+                else:
+                    current_filepath = str(os.path.join(root, file))
+                filepath_all.append(current_filepath)
+
+    return filepath_all
+
+
+def get_subdirs(dir_path):
+    """
+    获取 dir_path 的所有一级子文件夹
+    仅仅是文件夹名，不是完整路径
+    """
+    path_allclasses = Path(dir_path)
+    directories = [str(x) for x in path_allclasses.iterdir() if x.is_dir()]
+    dir_names = [item.split(os.sep)[-1] for item in directories]
+
+    return dir_names
 
 
 if __name__ == '__main__':

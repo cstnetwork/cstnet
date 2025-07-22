@@ -10,7 +10,7 @@ import logging
 import argparse
 from tqdm import tqdm
 
-from data_utils.Param20KDataset import MCBDataLoader
+from data_utils.Param20KDataset import Param20KDataset
 from models.cstnet_s2 import CstNetS2
 from models.cstpnt import CstPnt
 from models.utils import all_metric_cls
@@ -46,8 +46,8 @@ def main(args):
     logger.addHandler(file_handler)
 
     # datasets
-    train_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.n_point, is_train=True, data_augmentation=False)
-    test_dataset = MCBDataLoader(root=args.root_dataset, npoints=args.n_point, is_train=False, data_augmentation=False)
+    train_dataset = Param20KDataset(root=args.root_dataset, npoints=args.n_point, is_train=True, data_augmentation=False)
+    test_dataset = Param20KDataset(root=args.root_dataset, npoints=args.n_point, is_train=False, data_augmentation=False)
     num_class = len(train_dataset.classes)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)

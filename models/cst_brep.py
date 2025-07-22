@@ -28,12 +28,10 @@ from OCC.Core.GeomLProp import GeomLProp_SLProps
 from OCC.Core.BRepTools import breptools
 # others
 import os
-import open3d as o3d
 import pymeshlab
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 import json
 import logging
 from datetime import datetime
@@ -41,7 +39,6 @@ import multiprocessing
 import itertools
 
 # self
-import mesh_proc
 import utils
 
 
@@ -429,10 +426,32 @@ def get_logger(name: str = 'log'):
     return logger
 
 
+def get_points_mslab(mesh_file, n_points, save_path=None):
+
+    # 加载OBJ文件
+    ms = pymeshlab.MeshSet()
+    ms.load_new_mesh(mesh_file)
+
+    # 生成点云
+    ms.generate_sampling_poisson_disk(samplenum=n_points)
+
+    # 获取点云数据和法向量
+    vertex_matrix = ms.current_mesh().vertex_matrix()
+    normal_matrix = ms.current_mesh().vertex_normal_matrix()
+    data = np.hstack((vertex_matrix, normal_matrix))
+
+    if save_path is not None:
+        save_path = os.path.abspath(save_path)
+        # 保存点云数据和法向量
+        np.savetxt(save_path, data, fmt='%.6f', delimiter=' ')
+
+    return data
+
+
 def step2pcd(step_path, n_points, save_path, deflection=0.1, xyz_only=True):
     tmp_stl = 'tmp/gen_pcd_cst.stl'
     step2stl(step_path, tmp_stl)
-    vertex_matrix = mesh_proc.get_points_mslab(tmp_stl, n_points)
+    vertex_matrix = get_points_mslab(tmp_stl, n_points)
 
     if xyz_only:
         np.savetxt(save_path, vertex_matrix, fmt='%.6f', delimiter='\t')
@@ -470,7 +489,7 @@ def step2pcd(step_path, n_points, save_path, deflection=0.1, xyz_only=True):
 def step2pcd_faceseg(step_path, n_points, save_path, deflection=0.1):
     tmp_stl = 'tmp/gen_pcd_cst.stl'
     step2stl(step_path, tmp_stl)
-    vertex_matrix = mesh_proc.get_points_mslab(tmp_stl, n_points)
+    vertex_matrix = get_points_mslab(tmp_stl, n_points)
 
     n_points_real = vertex_matrix.shape[0]
 
