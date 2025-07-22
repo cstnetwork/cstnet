@@ -67,8 +67,8 @@ class Param20KDataset(Dataset):
     def __init__(self,
                  root=r'D:\document\DeepLearning\DataSet\MCB_PointCloud\MCBPcd_A',
                  is_train=True,
-                 npoints=2500,  # 每个点云文件的点数
-                 data_augmentation=True,  # 是否加噪音
+                 npoints=2500,
+                 data_augmentation=True,
                  ):
         """
         定位文件的路径如下：
@@ -207,5 +207,4 @@ def save_confusion_mat(pred_list: list, target_list: list, save_name):
 
 
 if __name__ == '__main__':
-
     pass
