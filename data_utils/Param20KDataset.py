@@ -31,7 +31,7 @@ class CstPntDataset(Dataset):
 
     def __getitem__(self, index):
         fn = self.datapath[index].strip()
-        point_set = np.loadtxt(fn)  # [x, y, z, ex, ey, ez, near, meta]
+        point_set = np.loadtxt(fn)  # [x, y, z, ex, ey, ez, adj, pt]
 
         try:
             choice = np.random.choice(point_set.shape[0], self.npoints, replace=True)
