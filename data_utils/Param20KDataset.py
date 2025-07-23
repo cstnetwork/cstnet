@@ -8,24 +8,15 @@ from models import utils
 
 class CstPntDataset(Dataset):
     def __init__(self,
-                 root=r'D:\document\DeepLearning\ParPartsNetWork\DataSetNew',
+                 root,
                  npoints=2500,
-                 data_augmentation=True,
-                 is_backaddattr=True
+                 data_augmentation=True
                  ):
+        print('CstPnt dataset, from:' + root)
 
         self.npoints = npoints
         self.data_augmentation = data_augmentation
-        self.is_backaddattr = is_backaddattr
-
-        print('STEPMillion dataset, from:' + root)
-        index_file = os.path.join(root, 'index_file.txt')
-
-        self.datapath = []
-        with open(index_file, 'r', encoding="utf-8") as f:
-            for line in f.readlines():
-                current_path = os.path.join(root, 'overall', line)
-                self.datapath.append(current_path)
+        self.datapath = utils.get_allfiles(root)
 
         print('instance all:', len(self.datapath))
 
@@ -36,28 +27,23 @@ class CstPntDataset(Dataset):
         try:
             choice = np.random.choice(point_set.shape[0], self.npoints, replace=True)
         except:
-            exit('except an error')
+            exit(f'insufficient point number of the point cloud: all points: {point_set.shape[0]}, required points: {self.npoints}')
 
         point_set = point_set[choice, :]
 
-        if self.is_backaddattr:
-            eualangle = point_set[:, 3: 6]
-            is_nearby = point_set[:, 6]
-            meta_type = point_set[:, 7]
+        xyz = point_set[:, :3]
+        mad = point_set[:, 3: 6]
+        adj = point_set[:, 6]
+        pt = point_set[:, 7]
 
-        point_set = point_set[:, :3]
-
-        point_set = point_set - np.expand_dims(np.mean(point_set, axis=0), 0)
-        dist = np.max(np.sqrt(np.sum(point_set ** 2, axis=1)), 0)
-        point_set = point_set / dist  # scale
+        xyz = xyz - np.expand_dims(np.mean(xyz, axis=0), 0)
+        dist = np.max(np.sqrt(np.sum(xyz ** 2, axis=1)), 0)
+        xyz = xyz / dist  # scale
 
         if self.data_augmentation:
-            point_set += np.random.normal(0, 0.02, size=point_set.shape)
+            xyz += np.random.normal(0, 0.02, size=xyz.shape)
 
-        if self.is_backaddattr:
-            return point_set, eualangle, is_nearby, meta_type
-        else:
-            return point_set
+        return xyz, mad, adj, pt
 
     def __len__(self):
         return len(self.datapath)
@@ -65,10 +51,11 @@ class CstPntDataset(Dataset):
 
 class Param20KDataset(Dataset):
     def __init__(self,
-                 root=r'D:\document\DeepLearning\DataSet\MCB_PointCloud\MCBPcd_A',
+                 root,
                  is_train=True,
                  npoints=2500,
                  data_augmentation=True,
+                 is_backcst=True
                  ):
         """
         定位文件的路径如下：
@@ -101,11 +88,11 @@ class Param20KDataset(Dataset):
         │
 
         """
+        print('Param20K dataset, from:' + root)
 
         self.npoints = npoints
         self.data_augmentation = data_augmentation
-
-        print('MCB dataset, from:' + root)
+        self.is_backcst = is_backcst
 
         if is_train:
             inner_root = os.path.join(root, 'train')
@@ -118,7 +105,6 @@ class Param20KDataset(Dataset):
         for c_class in category_all:
             class_root = os.path.join(inner_root, c_class)
             file_path_all = utils.get_allfiles(class_root)
-
             category_path[c_class] = file_path_all
 
         self.datapath = []
@@ -133,24 +119,32 @@ class Param20KDataset(Dataset):
     def __getitem__(self, index):
         fn = self.datapath[index]
         cls = self.classes[fn[0]]
-        point_set = np.loadtxt(fn[1])  # n*6 (x, y, z, i, j, k)
+        point_set = np.loadtxt(fn[1])  # (x, y, z, mad, adj, pt)
 
         try:
             choice = np.random.choice(point_set.shape[0], self.npoints, replace=False)
         except:
-            exit('except a error')
+            exit(f'insufficient point number of the point cloud: all points: {point_set.shape[0]}, required points: {self.npoints}')
 
         point_set = point_set[choice, :]
-        point_set = point_set[:, :3]
+        xyz = point_set[:, :3]
 
-        point_set = point_set - np.expand_dims(np.mean(point_set, axis=0), 0)
-        dist = np.max(np.sqrt(np.sum(point_set ** 2, axis=1)), 0)
-        point_set = point_set / dist  # scale
+        # scale points to [-1, 1]^2
+        xyz = xyz - np.expand_dims(np.mean(xyz, axis=0), 0)
+        dist = np.max(np.sqrt(np.sum(xyz ** 2, axis=1)), 0)
+        xyz = xyz / dist
 
         if self.data_augmentation:
-            point_set += np.random.normal(0, 0.02, size=point_set.shape)
+            xyz += np.random.normal(0, 0.02, size=xyz.shape)
 
-        return point_set, cls
+        if self.is_backcst:
+            mad = point_set[:, 3: 6]
+            adj = point_set[:, 6]
+            pt = point_set[:, 7]
+
+            return xyz, cls, mad, adj, pt
+        else:
+            return xyz, cls
 
     def __len__(self):
         return len(self.datapath)
