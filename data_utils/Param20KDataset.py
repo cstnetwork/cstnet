@@ -1,7 +1,6 @@
 import os
 import numpy as np
 from torch.utils.data import Dataset
-import matplotlib.pyplot as plt
 
 from models import utils
 
@@ -151,53 +150,6 @@ class Param20KDataset(Dataset):
 
     def n_classes(self):
         return len(self.classes)
-
-
-def vis_confusion_mat(file_name):
-    array_from_file = np.loadtxt(file_name, dtype=int)
-
-    matrix_size = array_from_file.max() + 1
-    matrix = np.zeros((matrix_size, matrix_size), dtype=int)
-
-    for i in range(array_from_file.shape[1]):
-        x = array_from_file[0, i]
-        y = array_from_file[1, i]
-        matrix[x, y] += 1
-
-    print(matrix)
-
-    plt.imshow(matrix, cmap='viridis', interpolation='nearest')
-    plt.colorbar(label='Counts')
-    plt.title('Confusion Matrix')
-    plt.xlabel('target')
-    plt.ylabel('predict')
-    plt.xticks(np.arange(matrix_size))
-    plt.yticks(np.arange(matrix_size))
-    plt.show()
-
-
-def save_confusion_mat(pred_list: list, target_list: list, save_name):
-    matrix_size = max(max(pred_list), max(target_list)) + 1
-    matrix = np.zeros((matrix_size, matrix_size), dtype=int)
-
-    list_len = len(pred_list)
-    if list_len != len(target_list):
-        return
-
-    for i in range(list_len):
-        x = pred_list[i]
-        y = target_list[i]
-        matrix[x, y] += 1
-
-    plt.imshow(matrix, cmap='viridis', interpolation='nearest')
-    plt.colorbar(label='Counts')
-    plt.title('Confusion Matrix')
-    plt.xlabel('target')
-    plt.ylabel('predict')
-    plt.xticks(np.arange(matrix_size))
-    plt.yticks(np.arange(matrix_size))
-    plt.savefig(save_name)
-    plt.close()
 
 
 if __name__ == '__main__':
