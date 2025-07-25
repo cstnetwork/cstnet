@@ -12,15 +12,15 @@ from pathlib import Path
 class MLP(nn.Module):
     def __init__(self, dimension: int, channels: tuple, bias: bool = True, dropout: float = 0.4, final_proc=False):
         """
-        :param dimension: 输入维度数，[0, 1, 2, 3]
-            输入数据维度: [bs, c], dimension = 0
-            输入数据维度: [bs, c, d], dimension = 1
-            输入数据维度: [bs, c, d, e], dimension = 2
-            输入数据维度: [bs, c, d, e, f], dimension = 3
-        :param channels: 输入层到输出层的维度，[in, hid1, hid2, ..., out]
+        :param dimension: input data dimension，[0, 1, 2, 3]
+            tensor: [bs, c], dimension = 0
+            tensor: [bs, c, d], dimension = 1
+            tensor: [bs, c, d, e], dimension = 2
+            tensor: [bs, c, d, e, f], dimension = 3
+        :param channels: channels along input and output layers，[in, hid1, hid2, ..., out]
         :param bias:
-        :param dropout: dropout 概率
-        :param final_proc:
+        :param dropout:
+        :param final_proc: is adding BatchNormalization, Active function, DropOut after final linear layers
         """
         super().__init__()
 
@@ -233,9 +233,6 @@ def knn(vertices: "(bs, vertice_num, 3)",  neighbor_num: int, is_backdis: bool =
         return neighbor_index
 
 
-
-
-
 def surface_knn(points_all: "(bs, n_pnts, 3)", k_near: int = 100, n_stepk = 10):
     ind_neighbor_all, all_dist = knn(points_all, n_stepk, True)
 
@@ -292,24 +289,22 @@ def all_metric_cls(all_preds: list, all_labels: list):
     """
     计算分类评价指标：Acc.instance, Acc.class, F1-score, mAP
     :param all_preds: [item0, item1, ...], item: [bs, n_classes]
-    :param all_labels: [item0, item1, ...], item: [bs, ]， 其中必须保存整形数据
+    :param all_labels: [item0, item1, ...], item: [bs, ], Only int tensor in supported
     :return: Acc.instance, Acc.class, F1-score-macro, F1-score-weighted, mAP
     """
-    # 将所有batch的预测和真实标签整合在一起
-    all_preds = np.vstack(all_preds)  # 形状为 [n_samples, n_classes]
-    all_labels = np.hstack(all_labels)  # 形状为 [n_samples]
+    all_preds = np.vstack(all_preds)  # [n_samples, n_classes]
+    all_labels = np.hstack(all_labels)  # [n_samples]
     n_samples, n_classes = all_preds.shape
 
-    # 确保all_labels中保存的为整形数据
     if not np.issubdtype(all_labels.dtype, np.integer):
-        raise TypeError('all_labels 中保存了非整形数据')
+        raise TypeError('Not all int data in all_labels')
 
-    # ---------- 计算 Acc.Instance ----------
+    # ---------- Acc.Instance ----------
     pred_choice = np.argmax(all_preds, axis=1)  # -> [n_samples, ]
     correct = np.equal(pred_choice, all_labels).sum()
     acc_ins = correct / n_samples
 
-    # ---------- 计算 Acc.class ----------
+    # ---------- Acc.class ----------
     acc_cls = []
     for class_idx in range(n_classes):
         class_mask = (all_labels == class_idx)
@@ -319,11 +314,11 @@ def all_metric_cls(all_preds: list, all_labels: list):
         acc_cls.append(cls_acc_sig)
     acc_cls = np.mean(acc_cls)
 
-    # ---------- 计算 F1-score ----------
+    # ---------- F1-score ----------
     f1_m = f1_score(all_labels, pred_choice, average='macro')
     f1_w = f1_score(all_labels, pred_choice, average='weighted')
 
-    # ---------- 计算 mAP ----------
+    # ---------- mAP ----------
     all_labels_one_hot = label_binarize(all_labels, classes=np.arange(n_classes))
 
     if n_classes == 2:
@@ -331,7 +326,6 @@ def all_metric_cls(all_preds: list, all_labels: list):
         all_labels_one_hot = np.concatenate([all_labels_one_hot_rev, all_labels_one_hot], axis=1)
 
     ap_sig = []
-    # 计算单个类别的 ap
     for i in range(n_classes):
         ap = average_precision_score(all_labels_one_hot[:, i], all_preds[:, i])
         ap_sig.append(ap)
@@ -361,9 +355,9 @@ def is_suffix_step(filename):
 
 
 def get_allfiles(dir_path, suffix='txt', filename_only=False):
-    '''
-    获取dir_path下的全部文件路径
-    '''
+    """
+    get all files in dir_path, include files in sub dirs
+    """
     filepath_all = []
 
     def other_judge(file_name):
@@ -391,8 +385,7 @@ def get_allfiles(dir_path, suffix='txt', filename_only=False):
 
 def get_subdirs(dir_path):
     """
-    获取 dir_path 的所有一级子文件夹
-    仅仅是文件夹名，不是完整路径
+    get all 1st sub dirs' name, not dir path
     """
     path_allclasses = Path(dir_path)
     directories = [str(x) for x in path_allclasses.iterdir() if x.is_dir()]
