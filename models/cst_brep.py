@@ -54,11 +54,12 @@ class Point3DForDataSet(gp_Pnt):
         self.mad = gp_Vec(0.0, 0.0, -1.0)
         self.is_edge_nearby = 0
         self.edge_nearby_threshold = 0.0
+        self.pt = -1
 
-        self.meta_eula_cal()
+        self.mad_cal()
         self.edge_nearby_cal()
 
-    def meta_eula_cal(self):
+    def mad_cal(self):
         aligned_surface = BRep_Tool.Surface(self.aligned_face)
         surface_type = aligned_surface.DynamicType()
         type_name = surface_type.Name()
@@ -66,22 +67,22 @@ class Point3DForDataSet(gp_Pnt):
         if type_name == 'Geom_ConicalSurface':
             self.pt = 1
             self.mad = Geom_ConicalSurface.DownCast(aligned_surface).Axis().Direction().XYZ()
-            self.eula_angle_rectify()
+            self.mad_rectify()
 
         elif type_name == 'Geom_CylindricalSurface':
             self.pt = 2
             self.mad = Geom_CylindricalSurface.DownCast(aligned_surface).Axis().Direction().XYZ()
-            self.eula_angle_rectify()
+            self.mad_rectify()
 
         elif type_name == 'Geom_Plane':
             self.pt = 3
             self.mad = Geom_Plane.DownCast(aligned_surface).Axis().Direction().XYZ()
-            self.eula_angle_rectify()
+            self.mad_rectify()
 
         else:
             self.pt = 0
 
-    def eula_angle_rectify(self):
+    def mad_rectify(self):
         ax_x = self.mad.X()
         ax_y = self.mad.Y()
         ax_z = self.mad.Z()
